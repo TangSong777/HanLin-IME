@@ -73,6 +73,8 @@ foreach ($name in 'default.yaml','rime_ice.schema.yaml','melt_eng.schema.yaml','
     Copy-PayloadFile (Join-Path $RimeSourceDir $name) (Join-Path $data $name)
 }
 Copy-PayloadFile (Join-Path $config 'rime_ice.dict.yaml') (Join-Path $data 'rime_ice.dict.yaml')
+# rime_ice.dict.yaml 的 import_tables 引用了 mixed_tokens（英文白名单），缺了它词典编译会失败。
+Copy-PayloadFile (Join-Path $config 'mixed_tokens.dict.yaml') (Join-Path $data 'mixed_tokens.dict.yaml')
 foreach ($name in '8105','41448','base','ext','tencent','others') {
     $file = "cn_dicts\$name.dict.yaml"
     Copy-PayloadFile (Join-Path $RimeSourceDir $file) (Join-Path $data $file)
