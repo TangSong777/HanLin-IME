@@ -295,8 +295,11 @@ void CCandidateList::UpdateUI(const Context& ctx, const Status& status) {
   /// In UWP, candidate window will only be shown
   /// if it is owned by active view window
   //_UpdateOwner();
+  // 候选与状态都没变时不必再通知宿主刷新 UI 元素：每次按键都会走到这里，
+  // 重复的 UpdateUIElement 只会让宿主多做一次无意义的重绘检查。
+  const bool uiChanged = !(_ui->ctx() == ctx && _ui->status() == status);
   _ui->Update(ctx, status);
-  if (_uiStarted)
+  if (_uiStarted && uiChanged)
     _UpdateUIElement();
 
   if (status.composing && (_uiStarted || _nativeForced))

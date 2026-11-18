@@ -5,10 +5,17 @@ cmake_minimum_required(VERSION 3.12)
 project(rime)
 set(CMAKE_CXX_STANDARD 17)
 
-set(rime_version 1.13.1)
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
+
+set(rime_version 1.17.0)
 set(rime_soversion 1)
 
 add_definitions(-DRIME_VERSION="${rime_version}")
+
+# generate compile_commands.json
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(GNUInstallDirs)
 
@@ -265,7 +272,7 @@ set(list "")
 foreach(mod ${rime_plugins_modules})
   set(list "${list},Q(${mod})")
 endforeach()
-add_definitions(-DRIME_EXTRA_MODULES=${list})
+set(RIME_SETUP_EXTRA_MODULES "${list}")
 if(BUILD_SHARED_LIBS AND BUILD_SEPARATE_LIBS AND rime_plugins_objs)
   set(rime_plugins_library rime-plugins)
 endif()

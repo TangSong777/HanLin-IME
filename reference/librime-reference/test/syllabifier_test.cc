@@ -78,6 +78,68 @@ TEST_F(RimeSyllabifierTest, CaseFailure) {
   ASSERT_FALSE(sp.end() == sp.find(syllable_id_["an"]));
 }
 
+TEST_F(RimeSyllabifierTest, DynamicNumeric) {
+  rime::Syllabifier s("'");
+  const rime::string input("an001234567890'tu42");
+
+  rime::SyllableGraph disabled;
+  EXPECT_EQ(2, s.BuildSyllableGraph(input, *prism_, &disabled));
+  EXPECT_TRUE(disabled.literal_syllables.empty());
+
+  s.EnableDynamicNumeric();
+  rime::SyllableGraph enabled;
+  EXPECT_EQ(input.size(), s.BuildSyllableGraph(input, *prism_, &enabled));
+  EXPECT_EQ((rime::vector<rime::string>{"001234567890", "42"}),
+            enabled.literal_syllables);
+  ASSERT_EQ(1, enabled.indices.at(2).size());
+  const auto& [id, properties] = *enabled.indices.at(2).begin();
+  ASSERT_NE(nullptr, enabled.GetLiteralSyllable(id));
+  EXPECT_EQ("001234567890", *enabled.GetLiteralSyllable(id));
+  EXPECT_EQ(input.find("tu"), properties.front()->end_pos);
+}
+
+TEST_F(RimeSyllabifierTest, DynamicPunctuation) {
+  const rime::string input = u8"an\uFF0Ctu-42\u3002na";
+  const rime::vector<rime::string> punctuation = {u8"\uFF0C", "-", u8"\u3002"};
+  rime::Syllabifier s;
+  s.EnableDynamicNumeric();
+  s.SetDynamicPunctuation(&punctuation);
+
+  rime::SyllableGraph graph;
+  EXPECT_EQ(input.size(), s.BuildSyllableGraph(input, *prism_, &graph));
+  EXPECT_EQ((rime::vector<rime::string>{u8"\uFF0C", "-", "42", u8"\u3002"}),
+            graph.literal_syllables);
+  const auto& [id, properties] = *graph.indices.at(2).begin();
+  ASSERT_NE(nullptr, graph.GetLiteralSyllable(id));
+  EXPECT_EQ(u8"\uFF0C", *graph.GetLiteralSyllable(id));
+  EXPECT_EQ(input.find("tu"), properties.front()->end_pos);
+}
+
+TEST_F(RimeSyllabifierTest, TrimDelimitersAroundDynamicNumber) {
+  rime::Syllabifier s("'");
+  s.EnableDynamicNumeric();
+  rime::SyllableGraph graph;
+  const rime::string input("''42'tu");
+  EXPECT_EQ(input.size(), s.BuildSyllableGraph(input, *prism_, &graph));
+  const auto& [id, properties] = *graph.indices.at(0).begin();
+  ASSERT_NE(nullptr, graph.GetLiteralSyllable(id));
+  EXPECT_EQ("42", *graph.GetLiteralSyllable(id));
+  EXPECT_EQ(input.find("tu"), properties.front()->end_pos);
+}
+
+TEST_F(RimeSyllabifierTest, DynamicSymbols) {
+  const rime::string input = u8"an_\u2026\u2026\u00A5\U0001F4B0'42/tu+";
+  rime::Syllabifier s("'");
+  s.EnableDynamicNumeric();
+  s.EnableDynamicSymbols();
+
+  rime::SyllableGraph graph;
+  EXPECT_EQ(input.size(), s.BuildSyllableGraph(input, *prism_, &graph));
+  EXPECT_EQ((rime::vector<rime::string>{"_", u8"\u2026", u8"\u2026", u8"\u00A5",
+                                       u8"\U0001F4B0", "42", "/", "+"}),
+            graph.literal_syllables);
+}
+
 TEST_F(RimeSyllabifierTest, CaseChangan) {
   rime::Syllabifier s;
   rime::SyllableGraph g;
@@ -159,4 +221,55 @@ TEST_F(RimeSyllabifierTest, TransposedSyllableGraph) {
   ASSERT_EQ(1, g.indices[0][syllable_id_["chan"]].size());
   ASSERT_FALSE(NULL == g.indices[0][syllable_id_["chan"]][0]);
   EXPECT_EQ(4, g.indices[0][syllable_id_["chan"]][0]->end_pos);
+}
+
+TEST_F(RimeSyllabifierTest, TrimLeadingDelimiters) {
+  rime::Syllabifier s(" '");
+  rime::SyllableGraph g;
+  const rime::string input("''a");
+  s.BuildSyllableGraph(input, *prism_, &g);
+  EXPECT_EQ(input.length(), g.input_length);
+  EXPECT_EQ(input.length(), g.interpreted_length);
+  EXPECT_EQ(2, g.vertices.size());
+  ASSERT_FALSE(g.vertices.end() == g.vertices.find(3));
+  EXPECT_EQ(rime::kNormalSpelling, g.vertices[1]);
+  rime::SpellingMap& sp(g.edges[0][3]);
+  EXPECT_EQ(1, sp.size());
+  ASSERT_FALSE(sp.end() == sp.find(syllable_id_["a"]));
+  EXPECT_EQ(rime::kNormalSpelling, sp[0].type);
+  EXPECT_EQ(0.0, sp[0].credibility);
+}
+
+TEST_F(RimeSyllabifierTest, TrimTrailingDelimiters) {
+  rime::Syllabifier s(" '");
+  rime::SyllableGraph g;
+  const rime::string input("a''");
+  s.BuildSyllableGraph(input, *prism_, &g);
+  EXPECT_EQ(input.length(), g.input_length);
+  EXPECT_EQ(input.length(), g.interpreted_length);
+  EXPECT_EQ(2, g.vertices.size());
+  ASSERT_FALSE(g.vertices.end() == g.vertices.find(3));
+  EXPECT_EQ(rime::kNormalSpelling, g.vertices[1]);
+  rime::SpellingMap& sp(g.edges[0][3]);
+  EXPECT_EQ(1, sp.size());
+  ASSERT_FALSE(sp.end() == sp.find(syllable_id_["a"]));
+  EXPECT_EQ(rime::kNormalSpelling, sp[0].type);
+  EXPECT_EQ(0.0, sp[0].credibility);
+}
+
+TEST_F(RimeSyllabifierTest, TrimBothLeadingAndTrailingDelimiters) {
+  rime::Syllabifier s(" '");
+  rime::SyllableGraph g;
+  const rime::string input("''a''");
+  s.BuildSyllableGraph(input, *prism_, &g);
+  EXPECT_EQ(input.length(), g.input_length);
+  EXPECT_EQ(input.length(), g.interpreted_length);
+  EXPECT_EQ(2, g.vertices.size());
+  ASSERT_FALSE(g.vertices.end() == g.vertices.find(5));
+  EXPECT_EQ(rime::kNormalSpelling, g.vertices[1]);
+  rime::SpellingMap& sp(g.edges[0][5]);
+  EXPECT_EQ(1, sp.size());
+  ASSERT_FALSE(sp.end() == sp.find(syllable_id_["a"]));
+  EXPECT_EQ(rime::kNormalSpelling, sp[0].type);
+  EXPECT_EQ(0.0, sp[0].credibility);
 }

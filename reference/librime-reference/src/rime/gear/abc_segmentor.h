@@ -23,6 +23,7 @@ class AbcSegmentor : public Segmentor {
   string initials_;
   string finals_;
   set<string> extra_tags_;
+  bool enable_dynamic_symbols_ = false;
 };
 
 }  // namespace rime

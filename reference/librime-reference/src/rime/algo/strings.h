@@ -3,6 +3,7 @@
 
 #include <rime/common.h>
 #include <initializer_list>
+#include <string_view>
 
 namespace rime {
 namespace strings {
@@ -14,6 +15,8 @@ vector<string> split(const string& str,
                      SplitBehavior behavior);
 
 vector<string> split(const string& str, const string& delim);
+
+size_t literal_symbol_length(std::string_view input);
 
 template <typename Iter, typename T>
 string join(Iter start, Iter end, T&& delim) {

@@ -1,236 +1,144 @@
 <#
 .SYNOPSIS
-  暂存安装器载荷并编译出单文件安装器。
-
+  生成寒淋输入法离线安装包。
 .DESCRIPTION
-  本脚本把出处各异的材料汇集到 payload\，再调用 Inno Setup 编译。
-  所有材料都不进仓库，每次打包现场取：
-
-    payload\ime\           本项目编译的三个文件（来自 ..\dist）
-    payload\updater\       WinSparkle（来自已装的小狼毫目录）
-    payload\skin\          搜狗 Color-P 皮肤（来自本机已部署的皮肤目录）
-    payload\rime-data\     雾凇拼音数据（来自本机 Rime 用户目录）
-    payload\upstream-installer.exe
-                           小狼毫官方安装器（优先用本机，缺失则从上游下载）
-
-.PARAMETER SkipCompile
-  只暂存载荷，不调用 Inno Setup。
-
-.PARAMETER UpstreamInstaller
-  指定官方安装器 exe 的路径。默认先找 ..\build-libs\，再找临时目录，最后下载。
-
-.EXAMPLE
-  pwsh -File .\build-installer.ps1
-  pwsh -File .\build-installer.ps1 -SkipCompile
+  使用 build-hanlin.ps1 的 x64 主进程、双架构 TSF 和 librime DLL。
+  从共享数据和雾凇源文件编译随包词库。
+  -SkipCompile 完成暂存和词库编译后退出。
 #>
 [CmdletBinding()]
 param(
-  [switch]$SkipCompile,
-  [string]$UpstreamInstaller,
-  [string]$WeaselRoot,
-  [string]$SkinDir,
-  [string]$RimeUserDir
+    [switch]$SkipCompile,
+    [string]$BuildRoot = (Join-Path $PSScriptRoot '..\output'),
+    [string]$SharedDataDir,
+    [string]$RimeSourceDir,
+    [string]$SkinDir
 )
 
 $ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
+$src = Split-Path $root -Parent
+$repo = Split-Path $src -Parent
+$config = Join-Path $repo 'rime-config'
+$installer = Join-Path $root 'HanLin.iss'
+$versionLine = Select-String -LiteralPath $installer -Pattern '^#define MyAppVersion "([0-9.]+)"$'
+$packageVersion = $versionLine.Matches[0].Groups[1].Value
+$packageName = "HanLin-Setup-$packageVersion.exe"
+$output = Join-Path $root 'output'
+$stage = Join-Path $output ('stage-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+$payload = Join-Path $stage 'payload'
+$data = Join-Path $payload 'data'
+$preset = Join-Path $data 'preset'
+$compiledProfile = Join-Path $stage 'compile-profile'
 
-$Root        = $PSScriptRoot
-$SrcRoot     = Split-Path $Root -Parent          # ..\src
-$Payload     = Join-Path $Root 'payload'
-$UpstreamVer = '0.17.4'
-# Color-P 自身的版本号：与上游小狼毫版本解耦（上游版本只决定安装目录与内嵌官方安装器）。
-$PackageVersion = '0.1.7'
-
-function Say([string]$m) { Write-Host "  $m" }
-function Head([string]$m) { Write-Host "`n=== $m ===" -ForegroundColor Cyan }
-
-# ---------------------------------------------------------------- 已装的小狼毫
-# 原先这里写死 D:\Rime\weasel-0.17.4。改为：命令行参数 > 注册表 > 常见位置。
-# 注册表项正是小狼毫自己写的安装位置，比猜目录可靠。
-if (-not $WeaselRoot) {
-  foreach ($hive in @('HKLM:\SOFTWARE\Rime\Weasel', 'HKLM:\SOFTWARE\WOW6432Node\Rime\Weasel')) {
-    $v = (Get-ItemProperty $hive -Name WeaselRoot -ErrorAction SilentlyContinue).WeaselRoot
-    if ($v -and (Test-Path (Join-Path $v 'WeaselServer.exe'))) { $WeaselRoot = $v; break }
-  }
+if (-not $SharedDataDir) {
+    $SharedDataDir = @((Join-Path $BuildRoot 'hanlin-tip-x64\data'), (Join-Path $repo 'weasel-0.17.4\data')) |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_ 'default.yaml') -PathType Leaf } | Select-Object -First 1
 }
-if (-not $WeaselRoot) {
-  $cands = @("$env:ProgramFiles\Rime\weasel-$UpstreamVer",
-             "${env:ProgramFiles(x86)}\Rime\weasel-$UpstreamVer",
-             "D:\Rime\weasel-$UpstreamVer", "C:\Rime\weasel-$UpstreamVer")
-  $WeaselRoot = $cands | Where-Object { Test-Path (Join-Path $_ 'WeaselServer.exe') } | Select-Object -First 1
+if (-not $RimeSourceDir) {
+    $RimeSourceDir = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Rime\Weasel' -Name RimeUserDir -ErrorAction SilentlyContinue).RimeUserDir
+    if (-not $RimeSourceDir) { $RimeSourceDir = Join-Path $env:APPDATA 'Rime' }
 }
-if (-not $WeaselRoot) {
-  throw "找不到已安装的小狼毫。用 -WeaselRoot 指定其目录（需含 WeaselServer.exe）。"
+if (-not $SkinDir) { $SkinDir = Join-Path $repo 'assets\Color-P' }
+if (-not $SharedDataDir -or -not (Test-Path -LiteralPath (Join-Path $SharedDataDir 'default.yaml') -PathType Leaf)) {
+    throw '请用 -SharedDataDir 指定包含 default.yaml 的 Rime 共享数据。'
 }
-
-# ---------------------------------------------------------------- 皮肤目录
-if (-not $SkinDir) {
-  foreach ($c in @("$env:ProgramData\ColorPWeasel\Color-P",
-                   "$env:LOCALAPPDATA\ColorPWeasel\Color-P",
-                   "D:\Rime\ColorPWeasel\Color-P")) {
-    if ($c -and (Test-Path (Join-Path $c 'skin.ini'))) { $SkinDir = $c; break }
-  }
+if (-not (Test-Path -LiteralPath (Join-Path $RimeSourceDir 'rime_ice.schema.yaml') -PathType Leaf)) {
+    throw '请用 -RimeSourceDir 指定雾凇拼音源文件目录。'
 }
-if (-not $SkinDir) {
-  throw "找不到已部署的 Color-P 皮肤（需含 skin.ini）。用 -SkinDir 指定。"
+if (-not (Test-Path -LiteralPath (Join-Path $SkinDir 'skin.ini') -PathType Leaf)) {
+    throw '皮肤目录缺少 skin.ini。'
 }
 
-# ---------------------------------------------------------------- Rime 用户目录
-if (-not $RimeUserDir) {
-  $RimeUserDir = (Get-ItemProperty 'HKCU:\Software\Rime\Weasel' -ErrorAction SilentlyContinue).RimeUserDir
-  if (-not $RimeUserDir) { $RimeUserDir = Join-Path $env:APPDATA 'Rime' }
+function Copy-PayloadFile([string]$Source, [string]$Target) {
+    New-Item -ItemType Directory -Path (Split-Path $Target -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath $Source -Destination $Target -Force
 }
 
-# ---------------------------------------------------------------- 目录骨架
-Head '准备目录'
-foreach ($d in 'ime', 'skin', 'updater', 'rime-data') {
-  New-Item -ItemType Directory -Force -Path (Join-Path $Payload $d) | Out-Null
-}
-Say "payload = $Payload"
-
-# ---------------------------------------------------------------- 1. 输入法本体
-Head '1/5 输入法本体（本项目编译产物）'
-$built = @{
-  'WeaselServer.exe' = Join-Path $SrcRoot 'dist\x64\WeaselServer.exe'
-  'weaselx64.dll'    = Join-Path $SrcRoot 'dist\x64\weaselx64.dll'
-  'weasel.dll'       = Join-Path $SrcRoot 'dist\x86\weasel.dll'
-}
-foreach ($k in $built.Keys) {
-  if (-not (Test-Path $built[$k])) {
-    throw "缺少编译产物 $($built[$k])。先运行 ..\build-weasel.ps1 -Both"
-  }
-  Copy-Item $built[$k] (Join-Path $Payload "ime\$k") -Force
-  Say "$k  <- $($built[$k])"
+Copy-PayloadFile (Join-Path $BuildRoot 'hanlin-tip-x64\HanLinHost.exe') (Join-Path $payload 'HanLinHost.exe')
+Copy-PayloadFile (Join-Path $BuildRoot 'hanlin-tip-x64\rime.dll') (Join-Path $payload 'rime.dll')
+foreach ($arch in 'x64','x86') {
+    Copy-PayloadFile (Join-Path $BuildRoot "hanlin-tip-$arch\HanLinTip.dll") (Join-Path $payload "$arch\HanLinTip.dll")
 }
 
-# 与已部署版本对比，提醒是否忘了重新部署
-foreach ($pair in @(
-    @{ n = 'WeaselServer.exe'; inst = Join-Path $WeaselRoot 'WeaselServer.exe' },
-    @{ n = 'weaselx64.dll';    inst = Join-Path $WeaselRoot 'weaselx64.dll' },
-    @{ n = 'weasel.dll';       inst = Join-Path $WeaselRoot 'weasel.dll' })) {
-  if (Test-Path $pair.inst) {
-    $a = (Get-FileHash (Join-Path $Payload "ime\$($pair.n)") -Algorithm SHA256).Hash
-    $b = (Get-FileHash $pair.inst -Algorithm SHA256).Hash
-    if ($a -ne $b) { Write-Warning "$($pair.n)：安装器将提供刚编译的版本，与已部署的不同（正常，前提是构建比部署新）" }
-  }
+New-Item -ItemType Directory -Path $data,$preset -Force | Out-Null
+foreach ($item in Get-ChildItem -LiteralPath $SharedDataDir) {
+    if ($item.PSIsContainer -and $item.Name -ne 'opencc') { continue }
+    if (-not $item.PSIsContainer -and $item.Name -notmatch '\.(?:yaml|txt)$') { continue }
+    Copy-Item -LiteralPath $item.FullName -Destination $data -Recurse -Force
 }
-
-# ---------------------------------------------------------------- 2. WinSparkle
-Head '2/5 自动更新组件 WinSparkle'
-$ws = Join-Path $WeaselRoot 'WinSparkle.dll'
-if (Test-Path $ws) {
-  Copy-Item $ws (Join-Path $Payload 'updater\WinSparkle.dll') -Force
-  Say "WinSparkle.dll  <- $ws"
-} else {
-  Write-Warning "找不到 $ws；安装器的 WinSparkle 组件会缺失（该组件是可选项）"
+# 雾凇从自己的 default.yaml 继承标点映射和按键绑定。
+foreach ($name in 'default.yaml','rime_ice.schema.yaml','melt_eng.schema.yaml','melt_eng.dict.yaml',
+                  'radical_pinyin.schema.yaml','radical_pinyin.dict.yaml','symbols_v.yaml','symbols_caps_v.yaml') {
+    Copy-PayloadFile (Join-Path $RimeSourceDir $name) (Join-Path $data $name)
 }
-
-# ---------------------------------------------------------------- 3. 皮肤
-Head '3/5 搜狗 Color-P 皮肤'
-if (-not (Test-Path (Join-Path $SkinDir 'skin.ini'))) {
-  throw "皮肤目录无效（缺 skin.ini）：$SkinDir。皮肤素材版权归原作者，仓库不收录，必须从本机已部署的皮肤取。"
+Copy-PayloadFile (Join-Path $config 'rime_ice.dict.yaml') (Join-Path $data 'rime_ice.dict.yaml')
+foreach ($name in '8105','41448','base','ext','tencent','others') {
+    $file = "cn_dicts\$name.dict.yaml"
+    Copy-PayloadFile (Join-Path $RimeSourceDir $file) (Join-Path $data $file)
 }
-Copy-Item (Join-Path $SkinDir '*') (Join-Path $Payload 'skin') -Force -Recurse
-$n = (Get-ChildItem (Join-Path $Payload 'skin') -File).Count
-Say "$n 个文件  <- $SkinDir"
-
-# ---------------------------------------------------------------- 4. rime-ice
-Head '4/5 雾凇拼音数据'
-if (-not (Test-Path $RimeUserDir)) { throw "Rime 用户目录不存在：$RimeUserDir" }
-foreach ($x in 'cn_dicts', 'en_dicts', 'lua', 'opencc') {
-  $p = Join-Path $RimeUserDir $x
-  if (Test-Path $p) {
-    Copy-Item $p (Join-Path $Payload 'rime-data') -Recurse -Force
-    Say "$x\"
-  } else {
-    Write-Warning "缺少 $p"
-  }
+foreach ($file in 'en_dicts\en.dict.yaml','en_dicts\en_ext.dict.yaml') {
+    Copy-PayloadFile (Join-Path $RimeSourceDir $file) (Join-Path $data $file)
 }
-# 顶层配置文件；排除个人数据（installation.yaml / user.yaml 含安装 ID 与偏好）
-Get-ChildItem $RimeUserDir -File |
-  Where-Object { $_.Name -notmatch '^(installation|user)\.yaml$' } |
-  ForEach-Object { Copy-Item $_.FullName (Join-Path $Payload 'rime-data') -Force }
-Say '顶层 *.yaml / *.txt'
-
-# 强制校验：不留任何个人数据
-$leak = @(Get-ChildItem (Join-Path $Payload 'rime-data') -Recurse -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -match 'userdb|^installation\.yaml$|^user\.yaml$|^sync$' })
-if ($leak.Count) { throw "打包的数据里混入了个人数据：$($leak[0].FullName)" }
-Say '✅ 已确认不含个人数据（无 userdb / sync / installation.yaml / user.yaml）'
-
-# ---------------------------------------------------------------- 5. 官方安装器
-Head '5/5 小狼毫官方安装器'
-$dest = Join-Path $Payload 'upstream-installer.exe'
-$candidates = @()
-if ($UpstreamInstaller) { $candidates += $UpstreamInstaller }
-$candidates += (Join-Path $SrcRoot "build-libs\weasel-$UpstreamVer.0-installer.exe")
-$candidates += (Join-Path $env:TEMP "weasel-base\weasel-$UpstreamVer.0-installer.exe")
-
-$found = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if ($found) {
-  Copy-Item $found $dest -Force
-  Say "取自 $found"
-} else {
-  $gh = Get-Command gh -ErrorAction SilentlyContinue
-  if (-not $gh) {
-    $ghPath = Join-Path $env:ProgramFiles 'GitHub CLI\gh.exe'
-    if (Test-Path $ghPath) { $gh = Get-Item $ghPath }
-  }
-  if ($gh) {
-    Say "本机没有，改用 gh 从上游下载 $UpstreamVer ..."
-    & $gh.Source release download $UpstreamVer --repo rime/weasel `
-        --pattern "weasel-$UpstreamVer.0-installer.exe" --dir (Join-Path $env:TEMP 'weasel-base') --clobber
-    Copy-Item (Join-Path $env:TEMP "weasel-base\weasel-$UpstreamVer.0-installer.exe") $dest -Force
-  } else {
-    throw "找不到官方安装器，也没有 gh 可用。请手动下载 https://github.com/rime/weasel/releases/tag/$UpstreamVer 的 weasel-$UpstreamVer.0-installer.exe 并用 -UpstreamInstaller 指定。"
-  }
+Copy-PayloadFile (Join-Path $RimeSourceDir 'en_dicts\cn_en.txt') (Join-Path $preset 'en_dicts\cn_en.txt')
+# ReverseDb resolves the calendar table inside the user directory.
+Copy-PayloadFile (Join-Path $RimeSourceDir 'lua\lunar.db') (Join-Path $preset 'lua\lunar.db')
+foreach ($folder in 'lua','opencc') {
+    $origin = Join-Path $RimeSourceDir $folder
+    foreach ($item in Get-ChildItem -LiteralPath $origin -Recurse -File) {
+        if ($item.Name -notmatch '\.(?:lua|json|txt|ocd2)$') { continue }
+        $relative = [IO.Path]::GetRelativePath($origin, $item.FullName)
+        Copy-PayloadFile $item.FullName (Join-Path (Join-Path $data $folder) $relative)
+    }
 }
-Say ("大小 {0:N1} MB" -f ((Get-Item $dest).Length / 1MB))
-
-# ---------------------------------------------------------------- 编译
-if ($SkipCompile) {
-  Head '已跳过编译（-SkipCompile）'
-  exit 0
+foreach ($item in Get-ChildItem -LiteralPath (Join-Path $config 'lua') -Filter '*.lua' -File) {
+    Copy-PayloadFile $item.FullName (Join-Path $data "lua\$($item.Name)")
 }
-
-Head '调用 Inno Setup 编译'
-# ISCC.exe 的查找顺序：先问注册表（Inno Setup 官方安装器会写下 InstallLocation，
-# 这也是唯一能覆盖"装在自定义位置"的办法），再试 PATH，最后才是几个常见目录。
-# 早先只猜固定目录，装在别处就得手改脚本。
-function Find-Iscc {
-  foreach ($hive in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1',
-                      'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1')) {
-    try {
-      $loc = (Get-ItemProperty -Path $hive -Name InstallLocation -ErrorAction Stop).InstallLocation
-      if ($loc) {
-        $c = Join-Path $loc 'ISCC.exe'
-        if (Test-Path $c) { return $c }
-      }
-    } catch { }
-  }
-  $onPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-  if ($onPath) { return $onPath.Source }
-  foreach ($c in @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-                   "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-                   "$env:ProgramFiles\Inno Setup 6\ISCC.exe")) {
-    if ($c -and (Test-Path $c)) { return $c }
-  }
-  return $null
+foreach ($name in 'default.custom.yaml','rime_ice.custom.yaml','custom_phrase.txt') {
+    Copy-PayloadFile (Join-Path $config $name) (Join-Path $preset $name)
 }
-$iscc = Find-Iscc
-if (-not $iscc) { throw "找不到 ISCC.exe。安装 Inno Setup 6：winget install JRSoftware.InnoSetup" }
-Say "ISCC = $iscc"
+$style = Get-Content -LiteralPath (Join-Path $config 'weasel.custom.yaml') -Raw
+$style -replace '(?m)^  style/ssf_skin:[^\r\n]*', '  style/ssf_skin: ""' |
+    Set-Content -LiteralPath (Join-Path $preset 'weasel.custom.yaml') -Encoding utf8
 
-& $iscc (Join-Path $Root 'Color-P.iss')
-if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败（exit $LASTEXITCODE）" }
-
-$out = Join-Path $Root "output\Color-P-Setup-$PackageVersion.exe"
-if (Test-Path $out) {
-  $h = (Get-FileHash $out -Algorithm SHA256).Hash
-  Head '完成'
-  Say ("产物   {0}" -f $out)
-  Say ("大小   {0:N2} MB" -f ((Get-Item $out).Length / 1MB))
-  Say ("SHA256 {0}" -f $h)
-} else {
-  throw '编译结束但找不到输出文件'
+$skin = Join-Path $payload 'skin'
+New-Item -ItemType Directory -Path $skin | Out-Null
+foreach ($item in Get-ChildItem -LiteralPath $SkinDir -File) {
+    if ($item.Name -eq 'skin.ini' -or $item.Extension -match '^\.(?:png|jpe?g|ico|bmp)$') {
+        Copy-Item -LiteralPath $item.FullName -Destination $skin
+    }
 }
+Copy-PayloadFile (Join-Path $src 'LICENSE.txt') (Join-Path $payload 'licenses\Weasel.txt')
+Copy-PayloadFile (Join-Path $repo 'reference\librime-reference\LICENSE') (Join-Path $payload 'licenses\librime.txt')
+Copy-PayloadFile (Join-Path $RimeSourceDir 'LICENSE') (Join-Path $payload 'licenses\rime-ice.txt')
+
+$deploy = Start-Process -FilePath (Join-Path $payload 'HanLinHost.exe') -ArgumentList @('--deploy','--user-data',('"{0}"' -f $compiledProfile)) -WorkingDirectory $payload -WindowStyle Hidden -PassThru -Wait
+if ($deploy.ExitCode -eq 3) { throw '打包需要临时使用寒淋部署程序。请先退出正在运行的寒淋后端。' }
+if ($deploy.ExitCode -ne 0) { throw "安装包词库编译失败，退出码 $($deploy.ExitCode)。" }
+Copy-Item -LiteralPath (Join-Path $compiledProfile 'build') -Destination (Join-Path $data 'build') -Recurse
+
+foreach ($name in 'default.yaml','rime_ice.schema.yaml','rime_ice.table.bin','rime_ice.prism.bin','weasel.yaml') {
+    if ((Get-Item -LiteralPath (Join-Path $data "build\$name")).Length -eq 0) { throw "安装包缺少编译产物 $name。" }
+}
+$private = @(Get-ChildItem -LiteralPath $payload -Recurse -Force | Where-Object {
+    $_.Name -match '\.userdb(?:\.|$)|^(installation\.yaml|user\.yaml|sync|sogou_phrases\.txt)$'
+})
+if ($private) { throw "安装包混入用户数据 $($private[0].Name)。" }
+"安装包载荷 $payload"
+if ($SkipCompile) { return }
+
+$iscc = (Get-Command ISCC.exe -CommandType Application -ErrorAction SilentlyContinue).Source
+if (-not $iscc) {
+    $programFiles32 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+    $candidates = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+                    "$programFiles32\Inno Setup 6\ISCC.exe",
+                    "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
+    $iscc = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+}
+if (-not $iscc) { throw '找不到 ISCC.exe，请先安装 Inno Setup 6.3 或更新版本。' }
+
+& $iscc "/DPayloadDir=$payload" $installer
+if ($LASTEXITCODE -ne 0) { throw "安装包编译失败，退出码 $LASTEXITCODE。" }
+$package = Get-Item -LiteralPath (Join-Path $output $packageName)
+if (-not $package.Length) { throw '安装包为空。' }
+$package.FullName

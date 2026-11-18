@@ -233,9 +233,19 @@ STDMETHODIMP CGetTextExtentEditSession::DoEditSession(TfEditCookie ec) {
   if (_generation != _pTextService->_CaretGeneration() ||
       (_pComposition && !_pTextService->_IsCurrentComposition(_pComposition)))
     return S_OK;
+  // 前台窗口必须属于本进程，否则这个排队请求已经过期。
+  // 例外：UWP 应用（便笺、设置、照片等）的前台窗口是
+  // ApplicationFrameHost.exe 的 ApplicationFrameWindow 外框，而 TSF 运行在
+  // 真正的应用进程里，PID 必然不同。若在这里直接返回，位置永远不会被标记为
+  // 有效，候选窗就永远不显示 —— 表现为「便笺里能打字，但看不到候选框」。
+  // 这种情况改用本线程的焦点窗口再判断一次。
   DWORD foreground_process = 0;
   GetWindowThreadProcessId(GetForegroundWindow(), &foreground_process);
-  if (foreground_process != GetCurrentProcessId()) return S_OK;
+  if (foreground_process != GetCurrentProcessId()) {
+    DWORD focus_process = 0;
+    GetWindowThreadProcessId(::GetFocus(), &focus_process);
+    if (focus_process != GetCurrentProcessId()) return S_OK;
+  }
   // A queued extent request may run after focus has moved to another field.
   com_ptr<ITfDocumentMgr> focused_document;
   com_ptr<ITfContext> focused_context;

@@ -89,18 +89,22 @@ patch:
     enable_sentence: false
     initial_quality: 0.9
 
-  # 让 0-9 成为合法拼写字符，支持「拼音 + 数字/型号」混合造句，例如
-  #   youyijianshiqingshishuo32meiyou26da -> 有一件事情是说32没有26大
-  #   esp32bistm32haoyong                 -> ESP32比STM32好用
-  #
-  # 数字词条来自 numeric.dict.yaml（0..99999）与 mixed_tokens.dict.yaml（ESP32/STM32），
-  # 都在 rime_ice.dict.yaml 的 import_tables 里。
-  #
+  # 将连续的 0-9 识别为一个音节，例如 keai258shenmi → 可爱258神秘。
+  translator/enable_dynamic_numeric: true
+  # 连续逐字选出的 2–5 字短语自动写入用户词库。
+  translator/enable_auto_phrase: true
+  # 普通拼音组合里的字面符号参与造句，计算器沿用原有解析。
+  speller/enable_dynamic_symbols: true
+  translator/dynamic_punctuation: "， 。 -"
+  speller/initials: "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA0123456789"
+
   # 数字进入 alphabet 后，主键盘数字本会被 speller 吃掉，所以 keypad_input.lua 里
   # 加了拦截：主键盘数字只用于选词，永不进入输入串；只有小键盘数字才作为拼写输入。
-  speller/alphabet: "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA`0123456789+-*/._"
+  speller/alphabet: "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA`0123456789+-*/._，。"
 
 
+  # 用同一个拆字辅码过滤器，普通输入生成的反引号按字面处理。
+  engine/filters/@9: lua_filter@*keypad_input*literal_search@radical_pinyin
   engine/filters/+:
     - lua_filter@*dedupe_filter
     # 抑制单字母前缀补全（u -> Ubuntu、i -> Intel），避免误触后整句被英文吃掉。
@@ -115,6 +119,12 @@ patch:
   # 分词器（kaol / zia / zai 全部不受影响）。
   # a/e/o 开头的 34 种没做 —— 它们本身是独立音节，ab 可切成 a+b，会干扰正常输入。
   speller/algebra/+:
+    # 搜狗拼音纠错里的五组音节写法
+    - derive/([aeio])ng$/$1gn/
+    - derive/([aeio])ng$/$1mg/
+    - derive/iu$/iou/
+    - derive/ui$/uei/
+    - derive/un$/uen/
     - derive/^ai/ia/
     - derive/^bi/ib/
     - derive/^ci/ic/

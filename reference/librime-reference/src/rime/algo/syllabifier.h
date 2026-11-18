@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <rime_api.h>
+#include <rime/common.h>
 #include "spelling.h"
 
 namespace rime {
@@ -22,7 +23,8 @@ using SyllableId = int32_t;
 struct EdgeProperties : SpellingProperties {
   EdgeProperties(SpellingProperties sup) : SpellingProperties(sup) {};
   EdgeProperties() = default;
-  bool is_correction = false;
+  // 切分歧義編碼段的起始位置
+  set<size_t> ambiguous_source_positions;
 };
 
 using SpellingMap = map<SyllableId, EdgeProperties>;
@@ -40,6 +42,16 @@ struct SyllableGraph {
   VertexMap vertices;
   EdgeMap edges;
   SpellingIndices indices;
+  // Negative syllable IDs refer to literal text owned by this graph.
+  vector<string> literal_syllables;
+
+  const string* GetLiteralSyllable(SyllableId id) const {
+    if (id >= 0)
+      return nullptr;
+    const auto index = static_cast<size_t>(-1 - id);
+    return index < literal_syllables.size() ? &literal_syllables[index]
+                                            : nullptr;
+  }
 };
 
 class Syllabifier {
@@ -56,14 +68,23 @@ class Syllabifier {
                                   Prism& prism,
                                   SyllableGraph* graph);
   RIME_DLL void EnableCorrection(Corrector* corrector);
+  void EnableDynamicNumeric() { enable_dynamic_numeric_ = true; }
+  void EnableDynamicSymbols() { enable_dynamic_symbols_ = true; }
+  void SetDynamicPunctuation(const vector<string>* spellings) {
+    dynamic_punctuation_ = spellings;
+  }
 
  protected:
   void CheckOverlappedSpellings(SyllableGraph* graph, size_t start, size_t end);
   void Transpose(SyllableGraph* graph);
+  size_t MatchLiteral(const string& input) const;
 
   string delimiters_;
   bool enable_completion_ = false;
   bool strict_spelling_ = false;
+  bool enable_dynamic_numeric_ = false;
+  bool enable_dynamic_symbols_ = false;
+  const vector<string>* dynamic_punctuation_ = nullptr;
   Corrector* corrector_ = nullptr;
 };
 

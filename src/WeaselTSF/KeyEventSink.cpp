@@ -133,8 +133,12 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
   // 组合属于另一个输入框：先终止，别让旧组合继续在新上下文里生效。
   if (_IsComposing() && _pEditSessionContext && pContext != _pEditSessionContext)
     _AbortComposition();
-  if (!_IsKeyboardDisabled() && _fTestKeyDownPending && _testedKey == wParam && _testedFlags == lParam &&
-      _testedContext == pContext && _testedTime == GetMessageTime()) {
+  // 同一按键可能被宿主重复通知多次（Chromium/CEF 会把一次按键拆成多条消息，
+  // GetMessageTime 也随之变化）。只比较扫描码与上下文会漏判，只比较时间又会
+  // 误吞正常的快速连按；这里用「同一个 wParam 且间隔很短」作为判据。
+  if (!_IsKeyboardDisabled() && _fTestKeyDownPending &&
+      weasel_host::SamePendingKey(_testedKey, _testedFlags, _testedContext, wParam, lParam, pContext) &&
+      GetMessageTime() >= _testedTime && GetMessageTime() - _testedTime <= 50) {
     *pfEaten = TRUE;
     return S_OK;
   }
@@ -156,8 +160,13 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
   // 同上：上下文变了就不再沿用旧组合。
   if (_IsComposing() && _pEditSessionContext && pContext != _pEditSessionContext)
     _AbortComposition();
-  if (!_IsKeyboardDisabled() && _fTestKeyDownPending && weasel_host::SamePendingKey(
-          _testedKey, _testedFlags, _testedContext, wParam, lParam, pContext)) {
+  const bool samePending =
+      _fTestKeyDownPending &&
+      (weasel_host::SamePendingKey(_testedKey, _testedFlags, _testedContext,
+                                   wParam, lParam, pContext) ||
+       (_testedKey == wParam && GetMessageTime() >= _testedTime &&
+        GetMessageTime() - _testedTime <= 50));
+  if (!_IsKeyboardDisabled() && samePending) {
     _fTestKeyDownPending = FALSE;
     *pfEaten = TRUE;
   } else {

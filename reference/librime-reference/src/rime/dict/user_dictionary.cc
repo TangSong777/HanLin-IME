@@ -30,6 +30,7 @@ struct DfsState {
   TickCount present_tick;
   Code code;
   vector<double> credibility;
+  vector<double> quality_len;
   hash_map<int, DictEntryList> query_result;
   an<DbAccessor> accessor;
   string key;
@@ -72,27 +73,32 @@ struct DfsState {
 void DfsState::RecruitEntry(size_t pos,
                             hash_map<string, SyllableId>* syllabary) {
   string full_code;
-  auto e = UserDictionary::CreateDictEntry(key, value, present_tick,
-                                           credibility.back(),
-                                           syllabary ? &full_code : nullptr);
+  auto e = UserDictionary::CreateDictEntry(
+      key, value, present_tick, credibility.back(), quality_len.back(),
+      syllabary ? &full_code : nullptr);
   if (e) {
     if (syllabary) {
       vector<string> syllables =
           strings::split(full_code, " ", strings::SplitBehavior::SkipToken);
-      Code numeric_code;
-      for (auto s = syllables.begin(); s != syllables.end(); ++s) {
-        auto found = syllabary->find(*s);
+      Code full_syllable_code = code;
+      for (size_t i = code.size(); i < syllables.size(); ++i) {
+        auto found = syllabary->find(syllables[i]);
         if (found == syllabary->end()) {
           LOG(ERROR) << "failed to recruit dict entry '" << e->text
-                     << "', unrecognized syllable: " << *s;
+                     << "', unrecognized syllable: " << syllables[i];
           return;
         }
-        numeric_code.push_back(found->second);
+        full_syllable_code.push_back(found->second);
       }
-      e->code = numeric_code;
+      e->code = std::move(full_syllable_code);
       e->matching_code_size = code.size();
     } else {
       e->code = code;
+    }
+    if (std::any_of(code.begin(), code.end(), [](SyllableId id) {
+          return id < 0;
+        })) {
+      e->custom_code = key.substr(0, key.find('\t'));
     }
     DLOG(INFO) << "add entry at pos " << pos;
     query_result[pos].push_back(e);
@@ -231,7 +237,7 @@ void UserDictionary::DfsLookup(const SyllableGraph& syll_graph,
       state->code.pop_back();
     }
     BOOST_SCOPE_EXIT_END
-    if (!TranslateCodeToString(state->code, &prefix))
+    if (!TranslateCodeToString(state->code, &prefix, &syll_graph))
       continue;
     for (size_t i = 0; i < spelling.second.size(); ++i) {
       auto props = spelling.second[i];
@@ -239,11 +245,18 @@ void UserDictionary::DfsLookup(const SyllableGraph& syll_graph,
         continue;
       state->credibility.push_back(state->credibility.back() +
                                    props->credibility);
+      size_t end_pos = props->end_pos;
+      // 全碼匹配長度積分
+      bool is_normal_spelling = props->type == kNormalSpelling;
+      double delta_quality_len =
+          (is_normal_spelling ? 1.0 : 0.0) * (end_pos - current_pos);
+      state->quality_len.push_back(state->quality_len.back() +
+                                   delta_quality_len);
       BOOST_SCOPE_EXIT((&state)) {
         state->credibility.pop_back();
+        state->quality_len.pop_back();
       }
       BOOST_SCOPE_EXIT_END
-      size_t end_pos = props->end_pos;
       DLOG(INFO) << "edge: [" << current_pos << ", " << end_pos << ")";
       if (prefix != state->key) {  // 'a b c |d ' > 'a b c \tabracadabra'
         DLOG(INFO) << "forward scanning for '" << prefix << "'.";
@@ -318,6 +331,7 @@ an<UserDictEntryCollector> UserDictionary::Lookup(
   FetchTickCount();
   state.present_tick = tick_ + 1;
   state.credibility.push_back(initial_credibility);
+  state.quality_len.push_back(0.0);
   state.accessor = db_->Query("");
   state.accessor->Jump(" ");  // skip metadata
   string prefix;
@@ -383,7 +397,7 @@ size_t UserDictionary::LookupWords(UserDictEntryIterator* result,
       break;
     }
     last_key = key;
-    auto e = CreateDictEntry(key, value, present_tick, 1.0, &full_code);
+    auto e = CreateDictEntry(key, value, present_tick, 1.0, len, &full_code);
     if (!e)
       continue;
     e->custom_code = full_code;
@@ -416,6 +430,17 @@ bool UserDictionary::UpdateEntry(const DictEntry& entry, int commits) {
 bool UserDictionary::UpdateEntry(const DictEntry& entry,
                                  int commits,
                                  const string& new_entry_prefix) {
+  return UpdateEntry(entry, commits, new_entry_prefix, false);
+}
+
+bool UserDictionary::AddEntry(const DictEntry& entry) {
+  return UpdateEntry(entry, 1, "", true);
+}
+
+bool UserDictionary::UpdateEntry(const DictEntry& entry,
+                                 int commits,
+                                 const string& new_entry_prefix,
+                                 bool only_if_absent) {
   string code_str(entry.custom_code);
   if (code_str.empty() && !TranslateCodeToString(entry.code, &code_str))
     return false;
@@ -423,6 +448,8 @@ bool UserDictionary::UpdateEntry(const DictEntry& entry,
   string value;
   UserDbValue v;
   if (db_->Fetch(key, &value)) {
+    if (only_if_absent)
+      return false;
     v.Unpack(value);
     if (v.tick > tick_) {
       v.tick = tick_;  // fix abnormal timestamp
@@ -500,11 +527,20 @@ bool UserDictionary::CommitPendingTransaction() {
   return false;
 }
 
-bool UserDictionary::TranslateCodeToString(const Code& code, string* result) {
+bool UserDictionary::TranslateCodeToString(const Code& code,
+                                           string* result,
+                                           const SyllableGraph* syllable_graph) {
   if (!table_ || !result)
     return false;
   result->clear();
   for (const SyllableId& syllable_id : code) {
+    if (syllable_graph) {
+      if (auto literal = syllable_graph->GetLiteralSyllable(syllable_id)) {
+        *result += *literal;
+        *result += ' ';
+        continue;
+      }
+    }
     string spelling = rev_syllabary_.count(syllable_id)
                           ? rev_syllabary_[syllable_id]
                           : (rev_syllabary_[syllable_id] =
@@ -524,6 +560,7 @@ an<DictEntry> UserDictionary::CreateDictEntry(const string& key,
                                               const string& value,
                                               TickCount present_tick,
                                               double credibility,
+                                              double quality_len,
                                               string* full_code) {
   an<DictEntry> e;
   size_t separator_pos = key.find('\t');
@@ -544,11 +581,13 @@ an<DictEntry> UserDictionary::CreateDictEntry(const string& key,
   double weight = algo::formula_p(0, (double)v.commits / present_tick,
                                   (double)present_tick, v.dee);
   e->weight = log(weight > 0 ? weight : DBL_EPSILON) + credibility;
+  e->quality_len = quality_len;
   if (full_code) {
     *full_code = key.substr(0, separator_pos);
   }
   DLOG(INFO) << "text = '" << e->text << "', code_len = " << e->code.size()
              << ", weight = " << e->weight
+             << ", quality_len = " << e->quality_len
              << ", commit_count = " << e->commit_count
              << ", present_tick = " << present_tick;
   return e;

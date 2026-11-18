@@ -50,7 +50,10 @@ void UIImpl::Show() {
     Hide();
     return;
   }
-  panel.ShowWindow(SW_SHOWNA);
+  // 已经可见时不再重复 ShowWindow：每次按键都会走到这里，重复调用会触发
+  // 一次多余的窗口激活/重绘检查。
+  if (!::IsWindowVisible(panel.m_hWnd))
+    panel.ShowWindow(SW_SHOWNA);
   shown = true;
   if (timer) {
     KillTimer(panel.m_hWnd, AUTOHIDE_TIMER);
@@ -66,7 +69,8 @@ void UIImpl::Hide() {
     timer = false;
     return;
   }
-  panel.ShowWindow(SW_HIDE);
+  if (::IsWindowVisible(panel.m_hWnd))
+    panel.ShowWindow(SW_HIDE);
   shown = false;
   if (timer) {
     KillTimer(panel.m_hWnd, AUTOHIDE_TIMER);
@@ -140,7 +144,7 @@ bool UI::Create(HWND parent) {
     return false;
 
   pimpl_->panel.Create(
-      parent, 0, 0, WS_POPUP,
+      parent, 0, L"寒淋输入法", WS_POPUP,
       WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
       0U, 0);
   return pimpl_->panel.IsWindow() != FALSE;

@@ -70,6 +70,8 @@ class UserDictionary : public Class<UserDictionary, const Ticket&> {
   bool UpdateEntry(const DictEntry& entry,
                    int commits,
                    const string& new_entry_prefix);
+  // Insert an inferred entry once, preserving existing weights and deletions.
+  bool AddEntry(const DictEntry& entry);
   bool UpdateTickCount(TickCount increment);
 
   bool NewTransaction();
@@ -83,18 +85,26 @@ class UserDictionary : public Class<UserDictionary, const Ticket&> {
                                        const string& value,
                                        TickCount present_tick,
                                        double credibility = 0.0,
+                                       double quality_len = 0.0,
                                        string* full_code = nullptr);
 
  protected:
   bool Initialize();
   bool FetchTickCount();
-  bool TranslateCodeToString(const Code& code, string* result);
+  bool TranslateCodeToString(const Code& code,
+                             string* result,
+                             const SyllableGraph* syllable_graph = nullptr);
   void DfsLookup(const SyllableGraph& syll_graph,
                  size_t current_pos,
                  const string& current_prefix,
                  DfsState* state);
 
  private:
+  bool UpdateEntry(const DictEntry& entry,
+                   int commits,
+                   const string& new_entry_prefix,
+                   bool only_if_absent);
+
   string name_;
   an<Db> db_;
   an<Table> table_;

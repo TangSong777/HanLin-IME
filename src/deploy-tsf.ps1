@@ -13,11 +13,9 @@
 $ErrorActionPreference = 'Stop'
 $log = 'C:\ProgramData\ColorPWeasel\deploy-tsf.log'
 $logDir = Split-Path $log -Parent
-if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
-Set-Content -Path $log -Value "deploy-tsf start $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Encoding UTF8
 function Log([string]$m) {
     Write-Host $m
-    Add-Content -Path $log -Value $m -Encoding UTF8
+    try { Add-Content -Path $log -Value $m -Encoding UTF8 } catch { }
 }
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -29,6 +27,8 @@ if (-not $isAdmin) {
     )
     exit 0
 }
+Log "deploy-tsf start $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
 Log "ADMIN ok"
 
 $root = 'D:\Rime'

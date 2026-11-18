@@ -30,6 +30,7 @@ struct CommitEntry : DictEntry {
   void Clear();
   void AppendPhrase(const an<Phrase>& phrase);
   bool Save() const;
+  int Length() const;
 };
 
 class Memory {
@@ -38,7 +39,8 @@ class Memory {
   virtual ~Memory();
 
   virtual bool Memorize(const CommitEntry& commit_entry) = 0;
-
+  virtual bool ProcessSegmentOnCommit(CommitEntry& commit_entry,
+                                      const Segment& seg);
   bool StartSession();
   bool FinishSession();
   bool DiscardSession();
@@ -49,7 +51,7 @@ class Memory {
   const Language* language() const { return language_.get(); }
 
  protected:
-  void OnCommit(Context* ctx);
+  virtual void OnCommit(Context* ctx);
   void OnDeleteEntry(Context* ctx);
   void OnUnhandledKey(Context* ctx, const KeyEvent& key);
 

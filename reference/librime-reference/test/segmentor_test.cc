@@ -7,7 +7,9 @@
 
 #include <gtest/gtest.h>
 #include <rime/common.h>
+#include <rime/config.h>
 #include <rime/engine.h>
+#include <rime/schema.h>
 #include <rime/segmentation.h>
 #include <rime/segmentor.h>
 
@@ -59,4 +61,30 @@ TEST(AbcSegmentorTest, PrefixMatch) {
   EXPECT_EQ(0, segmentation[0].start);
   EXPECT_EQ(7, segmentation[0].end);
   EXPECT_GE(1U, segmentation[0].tags.size());
+}
+
+TEST(AbcSegmentorTest, DynamicSymbols) {
+  auto* component = Segmentor::Require("abc_segmentor");
+  ASSERT_NE(nullptr, component);
+  the<Engine> engine(Engine::Create());
+  ASSERT_TRUE(engine->schema()->config()->SetItem("speller/enable_dynamic_symbols",
+                                                  New<ConfigValue>(true)));
+  the<Segmentor> segmentor(component->Create(engine.get()));
+  ASSERT_TRUE(segmentor);
+
+  Segmentation phrase;
+  phrase.Reset(u8"ni\u3010hao\u3011/ma");
+  EXPECT_TRUE(segmentor->Proceed(&phrase));
+  EXPECT_TRUE(phrase.HasFinishedSegmentation());
+  ASSERT_EQ(1, phrase.size());
+  EXPECT_TRUE(phrase.back().HasTag("abc"));
+
+  Segmentation calculator;
+  calculator.Reset("cc!ni");
+  Segment segment(0, calculator.input().size());
+  segment.tags.insert("calculator");
+  calculator.AddSegment(segment);
+  EXPECT_TRUE(segmentor->Proceed(&calculator));
+  EXPECT_TRUE(calculator.back().HasTag("calculator"));
+  EXPECT_FALSE(calculator.back().HasTag("abc"));
 }

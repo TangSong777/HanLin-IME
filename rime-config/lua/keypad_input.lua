@@ -1,10 +1,19 @@
--- Keep physical keypad digits and operators visible in the preedit without feeding them to
--- the speller.  `tail` starts at the first keypad literal: the live Rime input
--- before it remains the current candidate segment, and every later letter is
--- held for the next segment.  Selected segments are accumulated in `buffer`
+-- Keep literal input visible in the preedit. Digits and configured punctuation
+-- can enter the speller; `tail` starts at the first unsupported character and
+-- holds the input for the next segment. Selected segments accumulate in `buffer`
 -- rather than committed immediately, so `woshi4yang` stays visibly composed
 -- as `我是4yang` while `yang` is still being selected.
 local keypad_input = {}
+local literal_search_property = "weasel_keypad_literal_search_key"
+
+-- 每次挂载方案时各自缓存页大小。
+local function get_page_size(env)
+  if not env.page_size then
+    local n = env.engine.schema.config:get_int("menu/page_size") or 5
+    env.page_size = math.max(1, n)
+  end
+  return env.page_size
+end
 
 local keypad_literals = {
   KP_0 = "0", KP_1 = "1", KP_2 = "2", KP_3 = "3", KP_4 = "4",
@@ -80,6 +89,7 @@ local function letter_value(key_repr)
 end
 
 function keypad_input.init(env)
+  env.page_size = nil
   env.tail = ""
   env.tail_cursor = 0
   env.buffer = ""
@@ -92,32 +102,48 @@ function keypad_input.init(env)
   env.last_commit = nil
   local context = env.engine.context
 
+  local config = env.engine.schema.config
+  env.dynamic_symbols = config.get_bool and config:get_bool("speller/enable_dynamic_symbols")
+  local search_key = env.dynamic_symbols and
+      (config:get_string("key_binder/search") or config:get_string("search/key") or "`")
+  local literal_search_active = false
+  local function set_literal_search_key(input)
+    local active = search_key and search_key ~= "" and input:sub(1, 2) ~= "cC" and
+        input:find(search_key, 1, true) ~= nil or false
+    if active ~= literal_search_active then
+      literal_search_active = active
+      context:set_property(literal_search_property, active and "1" or "")
+    end
+  end
+
   env.quote_side = {}
+  local punctuation = {half_shape = {}, full_shape = {}}
   env.punctuation = function(repr)
     local value = punctuation_value(repr) or (repr == "apostrophe" and "'")
     if not value then return nil end
     if context.get_option and context:get_option("ascii_punct") then return value end
-    local config = env.engine.schema.config
-    if not config.get_string then return value end
+    if value == "/" or not config.get_string then return value end
     local shape = context.get_option and context:get_option("full_shape") and "full_shape" or "half_shape"
-    local path = "punctuator/" .. shape .. "/" .. value
-    if value == "/" then return value end
-    local mapped = config:get_string(path)
-    if mapped and mapped ~= "" then return mapped end
-    local opening = config:get_string(path .. "/pair/@0")
-    local closing = config:get_string(path .. "/pair/@1")
-    if opening and closing then
-      local close = env.quote_side[value]
-      env.quote_side[value] = not close
-      return close and closing or opening
+    local mappings = punctuation[shape]
+    local mapped = mappings[value]
+    if not mapped then
+      local path = "punctuator/" .. shape .. "/" .. value
+      mapped = config:get_string(path)
+      if not mapped or mapped == "" then
+        local opening = config:get_string(path .. "/pair/@0")
+        local closing = config:get_string(path .. "/pair/@1")
+        mapped = opening and closing and {opening, closing} or value
+      end
+      mappings[value] = mapped
     end
-    return value
+    if type(mapped) == "string" then return mapped end
+    local close = env.quote_side[value]
+    env.quote_side[value] = not close
+    return close and mapped[2] or mapped[1]
   end
 
   local function publish_tail()
-    -- These properties are read by the Weasel UI only.  Rime's context.input
-    -- contains just the active pinyin segment, so candidate lookup is never
-    -- polluted by keypad numbers or following segments.
+    -- The Weasel UI combines native preedit with a deferred suffix or prefix.
     context:set_property("weasel_keypad_suffix", env.tail)
     local active_cursor = env.tail_cursor == 0 and
         (context.caret_pos or #(context.input or "")) < #(context.input or "")
@@ -154,6 +180,7 @@ function keypad_input.init(env)
     -- erase the suffix.  Keep the whole replacement atomic from Lua's view.
     env.transitioning = true
     context:clear()
+    set_literal_search_key(input)
     if input ~= "" then
       context:push_input(input)
     end
@@ -316,6 +343,8 @@ function keypad_input.init(env)
     local active
     if calc then
       active = raw:match("^([A-Za-z'0-9%+%-%*/%.]*)") or ""
+    elseif env.dynamic_symbols and raw:sub(1, 2) ~= "cC" then
+      active = raw
     else
       active = raw:match("^([A-Za-z'0-9]*)") or ""
     end
@@ -347,8 +376,9 @@ function keypad_input.init(env)
   -- composition.  Never let a held virtual buffer leak into an unrelated
   -- input.
   env.update_connection = context.update_notifier:connect(function(ctx)
-    if not env.transitioning and
-        (env.tail ~= "" or env.buffer ~= "" or env.literal_only) and not ctx:is_composing() then
+    if env.transitioning or ctx:is_composing() then return end
+    set_literal_search_key("")
+    if env.tail ~= "" or env.buffer ~= "" or env.literal_only then
       clear_virtual_state()
     end
   end)
@@ -359,7 +389,10 @@ function keypad_input.func(key, env)
   -- Lock is a state, not a shortcut modifier. Keep Ctrl/Alt/Super untouched.
   local key_repr = key:repr():gsub("CapsLock%+", ""):gsub("Lock%+", "")
   local bare = key_repr:gsub("Release%+", ""):gsub("^Shift%+", "")
-  local mixed = env.tail ~= "" or env.buffer ~= "" or env.literal_only
+  local calc_input = context.input or ""
+  local calc_mode = calc_input:sub(1, 2) == "cC"
+  local mixed = env.tail ~= "" or env.buffer ~= "" or env.literal_only or
+      (env.dynamic_symbols and not calc_mode and calc_input:find("[^A-Za-z'0-9 ]"))
   local shift = bare == "Shift_L" or bare == "Shift_R"
   if shift and mixed then
     if key:release() then
@@ -382,9 +415,7 @@ function keypad_input.func(key, env)
 
   -- 计算器模式：input 以 cC 开头时，把数字与小键盘运算符送进真实输入串，
   -- 交给 lua_translator@*calc_translator 求值。其它模式下这些键的行为完全不变。
-  local calc_input = context.input or ""
-
-  if calc_input:sub(1, 2) == "cC" then
+  if calc_mode then
     local calc_ch = nil
     -- 只认小键盘：主键盘数字仍是选词键，主键盘符号仍走标点/字面量逻辑。
     if key_repr:match("^KP_(%d)$") then calc_ch = key_repr:match("^KP_(%d)$")
@@ -414,8 +445,7 @@ function keypad_input.func(key, env)
       -- 有虚拟尾巴时，候选要先并入 buffer（数字在输入串之外，原生选择拿不到）。
       if env.tail ~= "" or env.buffer ~= "" or env.literal_only then
         local segment = context.composition:back()
-        local page_size = env.engine.schema.config:get_int("menu/page_size") or 5
-        page_size = math.max(1, page_size)
+        local page_size = get_page_size(env)
         local page_start = math.floor(segment.selected_index / page_size) * page_size
         local candidate = index < page_size and segment:get_candidate_at(page_start + index)
         if candidate and env.accept_current_candidate(candidate) then
@@ -431,8 +461,7 @@ function keypad_input.func(key, env)
       --   page_start = selected_index / page_size * page_size
       --   select(page_start + index)）
       local segment = context.composition:back()
-      local page_size = env.engine.schema.config:get_int("menu/page_size") or 5
-      page_size = math.max(1, page_size)
+      local page_size = get_page_size(env)
       local page_start = math.floor(segment.selected_index / page_size) * page_size
       -- 只接受「当前页可见」的数字：页大小为 5 时，6/7/8/9/0 一律不选词。
       -- 否则按 6 会跳到下一页的第一个候选，与用户看到的候选框不符。
@@ -476,7 +505,7 @@ function keypad_input.func(key, env)
   -- 主键盘 -/= 的分工：
   --   =  : 始终翻下一页（有候选时）
   --   -  : 已翻页（不在第 1 页）时翻回上一页；仍在第 1 页时写进输入串 "-"
-  -- 1 字符，退格一次即可删除；不参与组词（符号无法成为 Rime 音节）。
+  -- 1 字符，退格一次即可删除。
   if context:has_menu() and key_repr == "equal" then
     return 2
   end
@@ -484,8 +513,7 @@ function keypad_input.func(key, env)
   if key_repr == "minus" and (context:has_menu() or context:is_composing()) then
     if context:has_menu() then
       local segment = context.composition:back()
-      local page_size = env.engine.schema.config:get_int("menu/page_size") or 5
-      page_size = math.max(1, page_size)
+      local page_size = get_page_size(env)
       local page_start = math.floor(segment.selected_index / page_size) * page_size
       if page_start > 0 then return 2 end        -- 已翻页 -> 上一页
     end
@@ -537,8 +565,7 @@ function keypad_input.func(key, env)
     end
   end
   local keypad_value = keypad_literals[key_repr]
-  if (key_repr == "Return" or key_repr == "KP_Enter") and
-      (env.tail ~= "" or env.buffer ~= "" or env.literal_only) then
+  if (key_repr == "Return" or key_repr == "KP_Enter") and mixed then
     local output = env.raw_buffer .. (context.input or "") .. env.tail
     env.clear_virtual_state()
     context:clear()
@@ -563,8 +590,7 @@ function keypad_input.func(key, env)
       -- Context:select emits select_notifier and can immediately commit via
       -- Rime's editor. Read the candidate without firing that notifier.
       local segment = context.composition:back()
-      local page_size = env.engine.schema.config:get_int("menu/page_size") or 5
-      page_size = math.max(1, page_size)
+      local page_size = get_page_size(env)
       local page_start = math.floor(segment.selected_index / page_size) * page_size
       local candidate = index < page_size and segment:get_candidate_at(page_start + index)
       if candidate and env.accept_current_candidate(candidate) then
@@ -584,28 +610,14 @@ function keypad_input.func(key, env)
     if output ~= "" then env.engine:commit_text(output) end
     return 1
   end
-  if (env.tail ~= "" or env.buffer ~= "" or env.literal_only) and context:is_composing() then
+  if mixed and context:is_composing() then
     local input = context.input or ""
     local raw = input .. env.tail
     local position = env.tail_cursor > 0 and (#input + env.tail_cursor) or
         math.max(0, math.min(context.caret_pos or #input, #input))
-    -- 标点在这里不能“立刻上屏”。
-    --
-    -- 本分支的 input/tail/buffer 里还压着未上屏的字母和字面量（例如 n4），
-    -- 若此刻 commit，标点会排在它们前面，最终得到 "。n4" 而不是 "n4。"。
-    -- 所以只处理“形态”问题：把方案配置的中文标点放进虚拟尾巴。
-    --
-    -- 这同时解决了模式一致性：若交给后面的 punctuator，它会按方案的
-    -- digit_separators 规则把紧跟数字的 , . : 改写成 ASCII（"4，" 变回 "4,"），
-    -- 与“中文模式一律中文标点”相反。自己记下配置形态就绕开了那条规则。
-    -- 需要 ASCII 小数点时用小键盘的 KP_Decimal，它走 keypad_literals 路径。
-    local punct = punctuation_value(key_repr)
-    if punct then
-      local mapped = env.punctuation(key_repr)
-      if mapped then
-        env.edit_raw(insert_at(raw, position, mapped), position + #mapped)
-        return 1
-      end
+    -- 普通拼音使用本次已映射的符号，成对引号每个按键只切换一次。
+    if (calc_mode or not env.dynamic_symbols) and punctuation_value(key_repr) then
+      keypad_value = env.punctuation(key_repr)
     end
     local value = keypad_value or
         (is_letter_or_apostrophe(key_repr) and letter_value(key_repr))
@@ -672,9 +684,8 @@ function keypad_input.func(key, env)
     return 1
   end
 
-  -- 数字进入真实输入，参与拼写与造句（ESP32、任意数字都能被 Rime 当音节）。
-  -- 其它小键盘运算符（+ - * / .）仍走虚拟尾巴，避免破坏标点与混合提交。
-  if keypad_value:match("^%d$") then
+  -- 按键到这里已经生成了字面字符。普通拼音组合中的符号参与拼写。
+  if keypad_value:match("^%d$") or (env.dynamic_symbols and not calc_mode) then
     env.edit_raw(before .. keypad_value .. after, caret + #keypad_value)
     return 1
   end
@@ -691,5 +702,42 @@ function keypad_input.fini(env)
     env.update_connection:disconnect()
   end
 end
+
+-- The auxiliary filter and its selection notifier share the trigger pattern.
+-- Suspend that trigger only while the keypad processor owns a literal copy.
+local literal_search = {}
+function literal_search.init(env)
+  env.search_filter = require("search")
+  env.search_filter.init(env)
+  local original_key = env.search_key_alt
+  local context = env.engine.context
+  local function refresh(ctx)
+    env.literal_search_active = ctx:get_property(literal_search_property) == "1"
+    env.search_key_alt = env.literal_search_active and "%z" or original_key
+  end
+  refresh(context)
+  env.literal_search_connection = context.property_update_notifier:connect(function(ctx, property)
+    if property == literal_search_property then refresh(ctx) end
+  end)
+end
+
+function literal_search.func(input, env)
+  if env.literal_search_active then
+    for cand in input:iter() do yield(cand) end
+    return
+  end
+  env.search_filter.func(input, env)
+end
+
+function literal_search.tags_match(segment, env)
+  return env.search_filter.tags_match(segment, env)
+end
+
+function literal_search.fini(env)
+  env.literal_search_connection:disconnect()
+  env.search_filter.fini(env)
+end
+
+keypad_input.literal_search = literal_search
 
 return keypad_input

@@ -7,6 +7,7 @@
 #ifndef RIME_SCRIPT_TRANSLATOR_H_
 #define RIME_SCRIPT_TRANSLATOR_H_
 
+#include <chrono>
 #include <rime/common.h>
 #include <rime/translation.h>
 #include <rime/translator.h>
@@ -30,27 +31,66 @@ class ScriptTranslator : public Translator,
  public:
   ScriptTranslator(const Ticket& ticket);
 
-  virtual an<Translation> Query(const string& input, const Segment& segment);
-  virtual bool Memorize(const CommitEntry& commit_entry);
+  virtual an<Translation> Query(const string& input,
+                                const Segment& segment) override;
+  virtual bool Memorize(const CommitEntry& commit_entry) override;
+  virtual bool ProcessSegmentOnCommit(CommitEntry& commit_entry,
+                                      const Segment& seg) override;
 
   string FormatPreedit(const string& preedit);
-  string Spell(const Code& code);
+  string Spell(const Code& code, const SyllableGraph* graph = nullptr);
   string GetPrecedingText(size_t start) const;
+  bool UpdateElements(const CommitEntry& commit_entry);
+
+  bool ConcatenatePhrases(CommitEntry& commit_entry,
+                          const vector<an<Phrase>>& phrases);
+  bool SaveCommitEntry(CommitEntry& commit_entry);
 
   // options
   int max_homophones() const { return max_homophones_; }
   int spelling_hints() const { return spelling_hints_; }
   bool always_show_comments() const { return always_show_comments_; }
   bool enable_word_completion() const { return enable_word_completion_; }
+  int max_word_length() const { return max_word_length_; }
+  int core_word_length() const;
+  bool enable_dynamic_numeric() const { return enable_dynamic_numeric_; }
+  const vector<string>& dynamic_punctuation() const {
+    return dynamic_punctuation_;
+  }
 
  protected:
   int max_homophones_ = 1;
   int spelling_hints_ = 0;
+  int max_word_length_ = 0;
+  int core_word_length_ = 0;
   bool always_show_comments_ = false;
   bool enable_correction_ = false;
   bool enable_word_completion_ = false;
+  bool enable_dynamic_numeric_ = false;
+  bool enable_dynamic_symbols_ = false;
+  vector<string> dynamic_punctuation_;
   the<Corrector> corrector_;
   the<Poet> poet_;
+  vector<an<Phrase>> queue_;
+
+ private:
+  void OnCommit(Context* ctx) override;
+  bool LearnAutoPhrase(Context* ctx);
+
+  struct SelectedCharacter {
+    string text;
+    SyllableId syllable;
+  };
+
+  bool enable_auto_phrase_ = false;
+  bool keep_auto_phrase_on_clear_ = false;
+  vector<SelectedCharacter> auto_phrase_characters_;
+  std::chrono::steady_clock::time_point last_character_commit_time_;
+  string last_character_text_;
+  string last_character_type_;
+  boost::signals2::scoped_connection auto_phrase_update_connection_;
+  boost::signals2::scoped_connection auto_phrase_key_connection_;
+  boost::signals2::scoped_connection auto_phrase_option_connection_;
 };
 
 }  // namespace rime

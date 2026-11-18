@@ -1,14 +1,14 @@
-# Color-P · 小狼毫定制输入法
+# 寒淋输入法 · HanLin-IME
 
-Color-P 是一个个人定制的 Windows 中文输入法发行版：以 [Weasel 小狼毫](https://github.com/rime/weasel) 0.17.4 为前端、[librime](https://github.com/rime/librime) 1.13.1 为引擎、[rime-ice 雾凇拼音](https://github.com/iDvel/rime-ice) 为方案，移植搜狗「竹子 Color-P」皮肤，并针对数字、型号与中英混排重做了输入行为。
+寒淋输入法使用自研 Windows TSF 文本服务，以 librime 1.17.0 为引擎，默认启用雾凇拼音。支持数字和符号混合造句、拼音纠错与逐字学词，候选窗沿用项目的 SSF 渲染层。
 
-> 本项目不是小狼毫或搜狗的官方版本，不受其支持。引擎与词库保持上游原样，改动集中在前端、配置与皮肤层。
+> 当前工作区包含寒淋的本地测试版。记事本、Edge、VS Code 和便笺的前台验收仍待完成。
 
 | | |
 |---|---|
-| 当前版本 | `0.1.6` |
-| 上游版本 | Weasel `0.17.4` / librime `1.13.1` |
-| 安装包 | `Color-P-Setup-0.1.6.exe`（约 27 MB，离线） |
+| 版本 | `0.2.0` |
+| 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
+| 本地测试包 | `HanLin-Setup-0.2.0.exe`，适用于 x64 Windows |
 | 许可证 | GPL-3.0（代码）· 皮肤素材版权归原作者 |
 
 ## 目录
@@ -40,13 +40,13 @@ Color-P 是一个个人定制的 Windows 中文输入法发行版：以 [Weasel 
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/TangSong777/Color-P/releases/latest) 下载 `Color-P-Setup-0.1.6.exe`，右键**以管理员身份运行**
-2. 装完**重启一次**（TSF 需要重新注册）
-3. 语言列表选择「小狼毫 / Color-P」，随便打一句：
+1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-0.2.0.exe`。
+2. 在 Windows 输入法列表选择「寒淋输入法」。
+3. 打一段拼音验证候选。
 
    ```
    nihao        →  你好
-   esp32bistm32haoyong  →  ESP32比STM32好用   （数字用小键盘打）
+   keai，sunxiaochuan258。nihao  →  可爱，孙笑川258。你好（数字用小键盘打）
    chat         →  ChatGPT
    ```
 
@@ -59,8 +59,8 @@ Color-P 是一个个人定制的 Windows 中文输入法发行版：以 [Weasel 
 | 层次 | 内容 |
 |---|---|
 | **本项目独有** | 搜狗 SSF 皮肤兼容层、小键盘原义输入与混合输入、英文白名单与分层补全、退格三档、候选窗生命周期修补、时间戳触发码禁用 |
-| **高度定制** | Weasel TSF 前端、rime-ice 方案配置（处理器与翻译器顺序、按键绑定）、词库启用范围、构建系统与安装器 |
-| **上游原样** | librime 引擎（`rime.dll`）、rime-ice 词库与 Lua 脚本、Color-P 皮肤素材、WinSparkle |
+| **高度定制** | HanLinTip 文本服务、librime 动态音节与学词、雾凇方案、构建与安装器 |
+| **复用** | Weasel 候选窗渲染代码、雾凇基础词库与 Lua 脚本、Color-P 皮肤素材 |
 
 ## 功能
 
@@ -105,26 +105,28 @@ woshi        →  选「我是」
 
 `-` 与 `_` 在输入串里是**字面量**，不转中文标点，也不参与组词——Rime 的 speller 只认声母+韵母组成的音节，符号成不了音节，会被当分隔符（候选按 `-` 前后分段）。没有候选框时仍遵循中文标点规则。
 
-### 混合造句
+### 混合造句（已停用）
 
-输入串中可以同时出现拼音、数字与型号，由 Rime 的语言模型直接组成一句：
+> **2026-11-10 起停用英文混排。** 平时习惯直接打英文，拼音与英文混排用得少，
+> 所以英文白名单不再作为词典词条参与造句；数字混排保留。
+> 重新启用：取消 `rime_ice.dict.yaml` 里 `- mixed_tokens` 的注释，重新部署即可。
+
+停用前，输入串中可以同时出现拼音、数字与型号，由 Rime 的语言模型直接组成一句：
 
 ```
-esp32bistm32haoyong                  →  ESP32比STM32好用
+esp32bistm32haoyong                  →  ESP32比STM32好用      （现已不出）
 youyijianshiqingshishuo32meiyou26da  →  有一件事情是说32没有26大
-arduinoqishiyejiunayang              →  Arduino其实也就那样
+arduinoqishiyejiunayang              →  Arduino其实也就那样    （现已不出）
 ```
 
 > 上面三个例子里的数字都来自**小键盘**。真实打字时主键盘数字会被当作选词键，
 > 只有小键盘数字才会进入输入串。
 
-实现由三部分组成：
-
-| 组成 | 作用 |
-|---|---|
-| `speller/alphabet` 含 `0-9` | 数字可作为拼写字符进入输入串 |
-| `numeric.dict.yaml`（0–99999） | 任意数字都能作为音节参与造句 |
-| `mixed_tokens.dict.yaml` | 白名单词与 ESP32 / STM32 可参与造句 |
+| 组成 | 状态 | 作用 |
+|---|---|---|
+| `speller/alphabet` 含 `0-9` | 保留 | 数字可作为拼写字符进入输入串 |
+| `numeric.dict.yaml`（0–99999） | 保留 | 任意数字都能作为音节参与造句 |
+| `mixed_tokens.dict.yaml` | **停用** | 白名单词与 ESP32 / STM32 参与造句（取消注释即可恢复） |
 
 数字的来源按按键区分：**小键盘数字参与拼写，主键盘数字只用于选词**。
 
@@ -136,7 +138,7 @@ arduinoqishiyejiunayang              →  Arduino其实也就那样
 |---|---|---|
 | 纯英文单词 | `table_translator@melt_eng` | 已移除。`hello` → 合理了哦，不出英文 |
 | 中英混排词 | `table_translator@cn_en` | 保留。词库 1001 条全部含中文（`X光`、`T恤`、`红Buff`） |
-| 指定名词 | `custom_phrase` + `custom_phrase_complete` | 90 个白名单词，精确命中 + 前缀补全 |
+| 指定名词 | `custom_phrase` + `custom_phrase_complete` | 91 个白名单词，精确命中 + 前缀补全 |
 
 白名单为科技厂商、开发工具、语言与常用软件，按规范大小写写入，**用小写编码输入**。完整清单（编码、分类、是否参与造句）见 **[自定义字词总表](docs/CUSTOM-WORDS.md)**。
 
@@ -203,42 +205,28 @@ cC 1 0 0 / 4      →  100/4=25.0
 
 ### 安装包
 
-从 [Releases](https://github.com/TangSong777/Color-P/releases/latest) 下载 `Color-P-Setup-0.1.6.exe`，右键以管理员身份运行。
-
-安装器依次完成：
-
-1. 运行内嵌的小狼毫官方安装器，注册文本服务与卸载项
-2. 覆盖本项目编译的输入法本体
-3. 部署皮肤到 `C:\ProgramData\ColorPWeasel\Color-P`
-4. 写入雾凇拼音数据、配色与按键配置到 Rime 用户目录
-5. 安装小键盘混合输入的 Lua 处理器
-6. 重新部署，使配置与皮肤生效
-
-装完**重启一次**，在语言列表选择「小狼毫 / Color-P」。
+本地安装包随附 x64 和 x86 文本服务、寒淋后台与预编译雾凇词库。安装程序注册文本服务，并将寒淋后台加入登录启动项。另可选择附带的 Color-P 皮肤。[历史发布](https://github.com/TangSong777/HanLin-IME/releases)
 
 静默安装（需在已提权终端中运行）：
 
 ```powershell
-Color-P-Setup-0.1.6.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
+HanLin-Setup-0.2.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 ```
-
-安装包不依赖外部组件：Boost 静态链接，`rime.dll` 与 `WinSparkle.dll` 随包提供，上游安装器内嵌。
 
 ### 安装布局
 
 | 内容 | 位置 |
 |---|---|
-| 输入法本体 | `C:\Program Files\Rime\weasel-0.17.4` |
-| 皮肤 | `C:\ProgramData\ColorPWeasel\Color-P` |
-| Rime 配置与词库 | 用户目录（默认 `%APPDATA%\Rime`） |
+| 输入法本体与共享词库 | `C:\Program Files\HanLin` |
+| 皮肤 | `C:\ProgramData\HanLin\Skin` |
+| Rime 用户目录 | `%APPDATA%\HanLin` |
+| 安装目录登记 | `HKLM\SOFTWARE\HanLin\InstallRoot`（x64 和 x86 注册表视图） |
 
-皮肤放在 `ProgramData` 而非 `Program Files`，是因为 Windows Search 等 AppContainer 宿主无法读取后者，会导致资源管理器中没有候选窗外观。
+寒淋与旧的小狼毫输入法各自使用独立目录。小狼毫旧用户目录里的个人词库留在原位。寒淋用户目录可通过 `HKCU\Software\HanLin\UserDataDir` 指定，修改配置后可在后台退出时运行 `HanLinHost.exe --deploy`。
 
-若系统已装小狼毫且路径不同，安装器会提示先卸载旧版，否则语言列表会出现两个同名输入法。
+卸载从 Windows「设置 → 应用」开始，注销寒淋文本服务并保留个人词库。
 
-卸载通过「设置 → 应用」或安装目录下的卸载程序完成：它会先调用小狼毫自带卸载器注销文本服务，再删除文件。
-
-### 手动部署
+### 小狼毫兼容配置
 
 已有小狼毫、只需更换皮肤与配置时：
 
@@ -272,7 +260,7 @@ Color-P-Setup-0.1.6.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 | 英文白名单（小写） | `chatgpt`、`cpu`、`vscode`；支持前缀 `chat` → `ChatGPT` |
 | 语言栏左键 / 右键 | 状态指示 / 打开菜单 |
 
-英文词条**必须小写输入**：大写走方案的「大写字母造词」通道（`zuogeDNAjiance` → 做个DNA检测）。
+英文词条**大小写都能出**：每条英文词条同时注册了小写编码和标准大小写编码，所以 `Desk` / `GitH` / `ChatG` / `Mark` 都能补全出 `Desktop` / `GitHub` / `ChatGPT` / `Markdown`。全大写输入（`DNA`）仍走方案的「大写字母造词」通道（`zuogeDNAjiance` → 做个DNA检测）。
 
 ### 颠倒输入识别
 
@@ -309,6 +297,7 @@ nihao-                       →  输入串 nihao-（- 是字面量，不参与�
 nihao_                       →  输入串 nihao_（_ 是字面量，不参与组词）
 esp32bistm32haoyong          →  ESP32比STM32好用（数字用小键盘）
 chat                         →  ChatGPT（前缀补全）
+Desk                         →  Desktop（大写也能补全）
 markdownqishiyejiunayang     →  Markdown其实也就那样
 cC 1 0 0 / 4                 →  100/4=25.0（小键盘）
 zuogeDNAjiance               →  做个DNA检测（大写造词）
@@ -325,7 +314,7 @@ nihaowoshiyanghanlin         →  Enter 或 Shift+Enter 都上屏 nihaowoshiyang
 | `default.custom.yaml` | 方案列表与全局快捷键 |
 | `rime_ice.custom.yaml` | 处理器/翻译器覆盖、按键绑定、英文分层、时间戳禁用、`speller/alphabet` |
 | `custom_phrase.txt` | 英文白名单与中文短码（`词条<Tab>编码`） |
-| `mixed_tokens.dict.yaml` | 可参与造句的词条（由白名单脚本派生） |
+| `mixed_tokens.dict.yaml` | 可参与造句的词条（由白名单脚本派生；当前停用） |
 | `numeric.dict.yaml` | 0–99999 数字词条（脚本生成） |
 | `rime_ice.dict.yaml` | 词库挂载表，含大字表与上述两个词条 |
 | `lua/keypad_input.lua` | 小键盘与数字混合输入处理器 |
@@ -381,7 +370,7 @@ chat → ChatGPT 出现在中文之后，但可以选到
 
 适用于换电脑、重装系统。
 
-1. 新机器安装**同版本**安装包（`Color-P-Setup-0.1.6.exe`），装完重启
+1. 新机器安装同版本安装包 `HanLin-Setup-0.2.0.exe`。
 2. 托盘菜单 →「退出」，确认 `WeaselServer.exe` 已结束（否则文件被占用）
 3. 把下表文件覆盖到新机器的 Rime 用户目录（托盘菜单 →「用户文件夹」）
 4. 确认 `weasel.custom.yaml` 的 `style/ssf_skin` 指向新机器实际皮肤路径
@@ -402,8 +391,8 @@ chat → ChatGPT 出现在中文之后，但可以选到
 | 文件 | 作用 | 属于 |
 |---|---|---|
 | `rime_ice.custom.yaml` | **权重与全部行为开关**（处理器/翻译器顺序、按键、时间戳禁用、补全分层、`alphabet`、过滤器） | 本项目独有 |
-| `custom_phrase.txt` | 90 个英文白名单 + 22 个中文短码 | 本项目独有 |
-| `mixed_tokens.dict.yaml` | 参与造句的词条（含权重列） | 本项目独有 |
+| `custom_phrase.txt` | 91 个英文白名单 + 22 个中文短码 | 本项目独有 |
+| `mixed_tokens.dict.yaml` | 参与造句的词条（含权重列；当前停用） | 本项目独有 |
 | `numeric.dict.yaml` | 0–99999 数字词条（1.7 MB） | 本项目独有 |
 | `rime_ice.dict.yaml` | 词库挂载表与顺序（**权重顺序就在这里**） | 本项目改过 |
 | `lua/keypad_input.lua` | 小键盘与数字混合输入 | 本项目独有 |
@@ -427,7 +416,7 @@ chat → ChatGPT 出现在中文之后，但可以选到
 #### 迁移后校验
 
 ```powershell
-# 1. 词条数量对不对（应为 英文 90 / 中文 22）
+# 1. 词条数量对不对（应为 英文 91 / 中文 22）
 pwsh -File .\src\build-support\gen-word-table.ps1 `
     -CustomPhrase <新目录>\custom_phrase.txt `
     -MixedTokens <新目录>\mixed_tokens.dict.yaml `
@@ -465,7 +454,7 @@ pwsh -File .\src\build-support\gen-word-table.ps1 `
 | 方向键在输入串两端环绕 | librime 1.13.1 限制（`_no_loop` 需 ≥ 1.16） |
 | 中文模式下主键盘 `.` 输出 `。` | 标点形态由中英模式决定；小数点请用小键盘 `KP_Decimal` |
 | 仅白名单内的英文词能出英文 | 有意设计，见[英文词条](#英文词条) |
-| 英文必须小写输入 | 大写走「大写字母造词」通道 |
+| 英文大小写都能补全 | 小写编码 + 标准大小写编码各一份；全大写仍走「大写字母造词」 |
 | 以词定字（`[` `]`）不可用 | 未保留 `select_character`，`[` `]` 归标点 |
 | 计算器只认小键盘 | 主键盘数字始终是选词键；只在 `cC` 模式下放行小键盘数字与运算符 |
 | 不做错音纠正（平翘舌、前后鼻音） | 模糊音会让 `zong` 也出「中/种」、`sen` 也出「神/深」，干扰大于收益；按标准拼音输入反而更顺手 |
@@ -534,21 +523,22 @@ rime-ice 默认把 `ts` 作为 Unix 时间戳触发码，而它同时是「唐�
 
 - `weasel.props` 由脚本自动生成：`vswhere` 探测 Visual Studio，按目录名探测 MSVC 与 Windows SDK
 - 所有脚本经 `build-support/Find-Toolchain.ps1` 探测工具链，不写死本机路径
-- 安装器为自写 Inno Setup：内嵌小狼毫官方安装器完成 TSF 注册，再覆盖本项目产物
+- Inno Setup 安装寒淋自己的 x64 和 x86 文本服务、引擎进程与共享数据
 
 ## 构建与测试
 
 ### 构建
 
-仓库自包含：克隆后可直接编译，不需要联网或手工前置文件。
+使用 Visual Studio 2022、Windows SDK、Boost 1.82、CMake 和 Ninja。寒淋复用 `WeaselUI.lib`。已构建的 librime 1.17.0 DLL 可通过 `-EngineDll` 指定，默认取 `src\dist\rime.dll`。
 
 ```powershell
-git clone https://github.com/TangSong777/Color-P.git
-cd Color-P
-pwsh -NoProfile -File .\src\build-weasel.ps1 -Both
+git clone https://github.com/TangSong777/HanLin-IME.git
+cd HanLin-IME
+pwsh -NoProfile -File .\src\build-weasel.ps1
+pwsh -NoProfile -File .\src\build-hanlin.ps1
 ```
 
-约 2.5 分钟，产出 x64 与 x86 两套二进制。需要 Visual Studio 2022 与 Boost 1.82+；librime 头文件、导入库与 WinSparkle 导入库已随仓库提供。
+寒淋产物位于 `src\output\hanlin-tip-x64` 和 `src\output\hanlin-tip-x86`。x64 目录也包含 `HanLinHost.exe` 与 `rime.dll`。
 
 `weasel.props` 由脚本自动生成。环境特殊时可用下列变量覆盖，并加 `-RegenerateProps` 重新生成：
 
@@ -560,25 +550,14 @@ pwsh -NoProfile -File .\src\build-weasel.ps1 -Both
 | `WEASEL_MSVC_ROOT` | MSVC 工具集 | 目录名探测 |
 | `WEASEL_SDK_VER` | SDK 版本 | 目录名探测 |
 
-产物位于 `src\dist\x64\` 与 `src\dist\x86\`：`weaselx64.dll`、`weasel.dll`、`WeaselServer.exe`、`WeaselDeployer.exe`、`WeaselSetup.exe`。
-
-### 部署
-
-需要替换：
-
-- 安装目录下的 `WeaselServer.exe`、`weaselx64.dll`、`weasel.dll`
-- `C:\Windows\System32\weasel.dll` 与 `C:\Windows\SysWOW64\weasel.dll`（需管理员权限；被宿主映射，用 `src/deploy-tsf.ps1` 可免重启替换，已运行的程序需各自重启）
-
-`WeaselServer.exe` 运行时被占用，替换前需停止进程。仓库提供免重启替换 TSF DLL 的 `src/deploy-tsf.ps1` / `deploy-tsf.cmd`（自动提权、改名替换、哈希校验），以及回滚脚本 `src/rollback-tsf.ps1`。
-
 ### 打包安装器
 
 ```powershell
-# 需要 Inno Setup 6：winget install JRSoftware.InnoSetup
-pwsh -File .\src\installer\build-installer.ps1
+# 需要 Inno Setup 6.3 或更新版本
+pwsh -File .\src\installer\build-installer.ps1 -SharedDataDir <Rime共享数据目录> -RimeSourceDir <雾凇拼音源目录>
 ```
 
-载荷（上游安装器、皮肤、词库）各自从本机取，不入仓库，因此需要已编译的 `src\dist` 与已部署的小狼毫和皮肤。脚本会校验打包数据不含 `userdb`、`sync/`、`installation.yaml`、`user.yaml`。
+打包程序从共享数据和雾凇源目录预编译随包词库。编译时需退出寒淋后台。生成的离线安装包位于 `src\installer\output\HanLin-Setup-0.2.0.exe`，个人词库、同步目录和搜狗导入短语均留在用户目录。
 
 ### 测试
 
@@ -661,7 +640,7 @@ D:\Rime\                     # 仓库根 = 小狼毫安装目录
 | 目标 | 修改 | 之后 |
 |---|---|---|
 | 英文词 / 中文短码 | `rime-config/custom_phrase.txt`（`词条<Tab>编码`） | 重新部署 |
-| 让英文词参与造句 | `mixed_tokens.dict.yaml` 增加一行 | 重新部署 |
+| 让英文词参与造句 | 取消 `rime_ice.dict.yaml` 里 `- mixed_tokens` 的注释 | 重新部署 |
 | 调整数字范围 | 重跑 `gen-numeric-dict.ps1` | 重新部署 |
 | 更新词表文档 | 重跑 `gen-word-table.ps1` | 提交 `docs/CUSTOM-WORDS.md` |
 
@@ -671,7 +650,7 @@ D:\Rime\                     # 仓库根 = 小狼毫安装目录
 
 ```yaml
 import_tables:
-  - mixed_tokens        # 参与造句的英文/型号
+  # - mixed_tokens      # 参与造句的英文/型号（当前停用）
   - numeric             # 数字
   - cn_dicts/8105       # 字表
   - cn_dicts/41448      # 大字表
@@ -699,12 +678,12 @@ import_tables:
 ### 可复现约定
 
 1. 脚本不写死机器路径，位置一律探测或由参数传入
-2. 版本号两处同步：`Color-P.iss` 的 `MyAppVersion` 与 `build-installer.ps1` 的 `$PackageVersion`
+2. 同步版本号到 `HanLin.iss` 和 `HanLinVersion.rc`。打包脚本读取 `HanLin.iss`。
 3. 发布前重跑生成脚本，保证文档与数据一致
 
 ## 版本与发布
 
-版本号与上游小狼毫版本解耦：上游 `0.17.4` 只决定安装目录与内嵌的官方安装器。
+寒淋版本号与 librime、雾凇拼音和候选渲染代码的上游版本各自维护。
 
 ### 分支模型
 
@@ -759,8 +738,8 @@ git add -A && git commit -m "<一句话>" && git push
 # ── 发版：全程在 snapshot 上 ──
 # 1. 读 PENDING-CHANGES.md 汇总，写入 CHANGELOG.md
 # 2. 改版本号（两处，必须一致）
-#    src\installer\Color-P.iss        -> MyAppVersion / MyAppVersionQuad
-#    src\installer\build-installer.ps1 -> $PackageVersion
+#    src\installer\HanLin.iss        -> MyAppVersion / MyAppVersionQuad
+#    src\HanLin\HanLinVersion.rc       -> FILEVERSION / PRODUCTVERSION
 # 3. 清空账本，提交推送
 git add -A && git commit -m "发布 <版本>" && git push
 # 4. 打包并核对（版本资源、载荷哈希）
@@ -768,22 +747,22 @@ pwsh -File .\src\installer\build-installer.ps1
 # 5. 合并到 master（只允许快进）
 git checkout master && git merge --ff-only snapshot && git push
 # 6. 在 master 上打标签并发布
-git tag -a <版本> -m "Color-P <版本>" && git push origin <版本>
-gh release create <版本> .\src\installer\output\Color-P-Setup-<版本>.exe `
+git tag -a <版本> -m "HanLin-IME <版本>" && git push origin <版本>
+gh release create <版本> .\src\installer\output\HanLin-Setup-<版本>.exe `
     .\src\installer\output\SHA256SUMS.txt `
-    --title "Color-P <版本>" --notes-file RELEASE-NOTES.md --latest
+    --title "寒淋输入法 <版本>" --notes-file RELEASE-NOTES.md --latest
 # 7. 切回 snapshot 继续工作
 git checkout snapshot
 ```
 
-安装包文件名固定为 `Color-P-Setup-<版本>.exe`，附带 `SHA256SUMS.txt`。
+安装包文件名为 `HanLin-Setup-<版本>.exe`，发布时附带 `SHA256SUMS.txt`。
 
 > 打包与验证在**合并之前**完成。若打包失败，`master` 与 tag 都不会被污染 —— 稳定版永远指向一个真的能出包的提交。
 
 ## 致谢与许可
 
 - 输入引擎：[librime](https://github.com/rime/librime)（BSD-3-Clause）
-- 前端基底：[Weasel 小狼毫](https://github.com/rime/weasel)（GPL-3.0）
+- 候选窗渲染代码：[Weasel 小狼毫](https://github.com/rime/weasel)（GPL-3.0）
 - 拼音方案：[rime-ice 雾凇拼音](https://github.com/iDvel/rime-ice)（MIT）
 - 皮肤原作：搜狗「竹子 Color-P」，作者**墨竹**；本仓库仅做小狼毫层面的移植
 

@@ -8,6 +8,7 @@
 #include <rime/config.h>
 #include <rime/schema.h>
 #include <rime/segmentation.h>
+#include <rime/algo/strings.h>
 #include <rime/gear/abc_segmentor.h>
 
 static const char kRimeAlphabet[] = "zyxwvutsrqponmlkjihgfedcba";
@@ -23,6 +24,7 @@ AbcSegmentor::AbcSegmentor(const Ticket& ticket)
     config->GetString("speller/delimiter", &delimiter_);
     config->GetString("speller/initials", &initials_);
     config->GetString("speller/finals", &finals_);
+    config->GetBool("speller/enable_dynamic_symbols", &enable_dynamic_symbols_);
     if (auto extra_tags = config->GetList("abc_segmentor/extra_tags")) {
       for (size_t i = 0; i < extra_tags->size(); ++i) {
         if (auto value = As<ConfigValue>(extra_tags->GetAt(i))) {
@@ -42,9 +44,20 @@ bool AbcSegmentor::Proceed(Segmentation* segmentation) {
   size_t j = segmentation->GetCurrentStartPosition();
   size_t k = j;
   bool expecting_an_initial = true;
+  const bool allow_symbols =
+      enable_dynamic_symbols_ &&
+      (segmentation->empty() || !segmentation->back().HasTag("calculator"));
+  const std::string_view view(input);
   for (; k < input.length(); ++k) {
     bool is_letter = alphabet_.find(input[k]) != string::npos;
-    bool is_delimiter = (k != j) && (delimiter_.find(input[k]) != string::npos);
+    bool is_delimiter = (k != 0) && (delimiter_.find(input[k]) != string::npos);
+    if (allow_symbols && k != j && !is_delimiter) {
+      if (auto length = strings::literal_symbol_length(view.substr(k))) {
+        k += length - 1;
+        expecting_an_initial = true;
+        continue;
+      }
+    }
     if (!is_letter && !is_delimiter)
       break;
     bool is_initial = initials_.find(input[k]) != string::npos;

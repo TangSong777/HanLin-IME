@@ -1,4 +1,4 @@
-# 生成「自定义字词总表」(docs/CUSTOM-WORDS.md)。
+﻿# 生成「自定义字词总表」(docs/CUSTOM-WORDS.md)。
 #
 # 数据来源（唯一事实来源，不手工抄写）：
 #   custom_phrase.txt        —— 英文白名单 + 中文短码
@@ -57,6 +57,8 @@ $chinese = @()
 foreach ($line in $rows) {
   $p = $line -split "`t"
   $word = $p[0]; $code = $p[1]
+  # 标准大小写变体（VSCode<Tab>VSCode）只是让大写输入也能补全，不重复计入词条数。
+  if ($word -ceq $code -and $word -cmatch '[A-Z]') { continue }
   if ($word -match '[^\x00-\x7F]') { $chinese += [pscustomobject]@{ Word = $word; Code = $code } }
   else                             { $english += [pscustomobject]@{ Word = $word; Code = $code } }
 }
@@ -93,6 +95,8 @@ Add-Line '>'
 Add-Line "> 生成时间：$now"
 Add-Line ''
 Add-Line '## 概览'
+Add-Line ''
+Add-Line '> 2026-11-10 起英文白名单停用造句（`rime_ice.dict.yaml` 未导入 `mixed_tokens`）；下表「参与造句 ✅」只表示词条具备该能力，恢复导入后才实际生效。'
 Add-Line ''
 Add-Line '| 类别 | 数量 | 输入方式 | 参与造句 |'
 Add-Line '|---|---:|---|---|'
@@ -200,7 +204,7 @@ Add-Line '| 编码与词条都不含空格 | `visualstudio`、`platformio` |'
 Add-Line '| 含数字的词编码去数字 | `STM32CubeMX` → `stmcubemx`；数字编码本身要用小键盘 |'
 Add-Line '| 主键盘数字只选词 | 1–9（0 = 第 10 个）永远是选词，不会进入编码 |'
 Add-Line '| 小键盘数字才输入数字 | `KP_0`–`KP_9` 参与拼写与造句 |'
-Add-Line '| 英文词条可参与造句 | 如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |'
+Add-Line '| 英文词条可参与造句 | 需先恢复 `mixed_tokens` 导入；停用前如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |'
 Add-Line ''
 
 # ---- 维护方式 ----
@@ -209,7 +213,7 @@ Add-Line ''
 Add-Line '| 想改什么 | 改哪里 | 之后做什么 |'
 Add-Line '|---|---|---|'
 Add-Line '| 英文词 / 中文短码 | `custom_phrase.txt`（`词条<Tab>编码`） | 重新部署 |'
-Add-Line '| 让某个英文词参与造句 | `mixed_tokens.dict.yaml` 加一行 | 重新部署 |'
+Add-Line '| 恢复英文造句 | 取消 `rime_ice.dict.yaml` 里 `- mixed_tokens` 的注释 | 重新部署 |'
 Add-Line '| 数字范围 | 重跑 `gen-numeric-dict.ps1` | 重新部署 |'
 Add-Line '| 本表格 | 重跑 `gen-word-table.ps1` | 提交 |'
 Add-Line ''
