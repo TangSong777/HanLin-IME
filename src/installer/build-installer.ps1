@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
   生成寒淋输入法离线安装包。
@@ -12,7 +13,8 @@ param(
     [string]$BuildRoot = (Join-Path $PSScriptRoot '..\output'),
     [string]$SharedDataDir,
     [string]$RimeSourceDir,
-    [string]$SkinDir
+    [string]$SkinDir,
+    [string]$OutputDir = (Join-Path $PSScriptRoot 'output')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,15 +23,24 @@ $src = Split-Path $root -Parent
 $repo = Split-Path $src -Parent
 $config = Join-Path $repo 'rime-config'
 $installer = Join-Path $root 'HanLin.iss'
-$versionLine = Select-String -LiteralPath $installer -Pattern '^#define MyAppVersion "([0-9.]+)"$'
-$packageVersion = $versionLine.Matches[0].Groups[1].Value
+. (Join-Path $src 'build-support\HanLinBuild.ps1')
+$packageVersion = Get-HanLinVersion $installer
 $packageName = "HanLin-Setup-$packageVersion.exe"
-$output = Join-Path $root 'output'
+$output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
 $stage = Join-Path $output ('stage-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 $payload = Join-Path $stage 'payload'
 $data = Join-Path $payload 'data'
 $preset = Join-Path $data 'preset'
 $compiledProfile = Join-Path $stage 'compile-profile'
+
+$manifestFile = Join-Path $BuildRoot 'HanLinBuild.json'
+if (-not (Test-Path -LiteralPath $manifestFile -PathType Leaf)) {
+    throw '找不到 HanLinBuild.json，请先用 build-hanlin.ps1 生成此构建目录。'
+}
+$manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json -AsHashtable
+if ($manifest.version -cne $packageVersion -or $manifest.sourceFingerprint -cne (Get-HanLinSourceFingerprint $src)) {
+    throw '构建记录与当前前端源码或版本不同，请重新运行 build-hanlin.ps1。'
+}
 
 if (-not $SharedDataDir) {
     $SharedDataDir = @((Join-Path $BuildRoot 'hanlin-tip-x64\data'), (Join-Path $repo 'weasel-0.17.4\data')) |
@@ -55,11 +66,17 @@ function Copy-PayloadFile([string]$Source, [string]$Target) {
     Copy-Item -LiteralPath $Source -Destination $Target -Force
 }
 
-Copy-PayloadFile (Join-Path $BuildRoot 'hanlin-tip-x64\HanLinHost.exe') (Join-Path $payload 'HanLinHost.exe')
-Copy-PayloadFile (Join-Path $BuildRoot 'hanlin-tip-x64\rime.dll') (Join-Path $payload 'rime.dll')
-foreach ($arch in 'x64','x86') {
-    Copy-PayloadFile (Join-Path $BuildRoot "hanlin-tip-$arch\HanLinTip.dll") (Join-Path $payload "$arch\HanLinTip.dll")
+foreach ($artifact in (Get-HanLinBuildArtifacts).GetEnumerator()) {
+    $target = Join-Path $payload $artifact.Key
+    Copy-PayloadFile (Join-Path $BuildRoot $artifact.Value) $target
+    if ((Get-FileHash -LiteralPath $target).Hash -cne $manifest.artifacts[$artifact.Key]) {
+        throw "$($artifact.Key) 的哈希与构建记录不同，请重新运行 build-hanlin.ps1。"
+    }
+    if ($artifact.Key -ne 'rime.dll' -and [Diagnostics.FileVersionInfo]::GetVersionInfo($target).ProductVersion -cne $packageVersion) {
+        throw "$($artifact.Key) 的产品版本与安装包版本不同。"
+    }
 }
+Copy-PayloadFile (Join-Path $root 'Migrate-HanLinUserData.ps1') (Join-Path $payload 'Migrate-HanLinUserData.ps1')
 
 New-Item -ItemType Directory -Path $data,$preset -Force | Out-Null
 foreach ($item in Get-ChildItem -LiteralPath $SharedDataDir) {
@@ -73,8 +90,12 @@ foreach ($name in 'default.yaml','rime_ice.schema.yaml','melt_eng.schema.yaml','
     Copy-PayloadFile (Join-Path $RimeSourceDir $name) (Join-Path $data $name)
 }
 Copy-PayloadFile (Join-Path $config 'rime_ice.dict.yaml') (Join-Path $data 'rime_ice.dict.yaml')
-# rime_ice.dict.yaml 的 import_tables 引用了 mixed_tokens（英文白名单），缺了它词典编译会失败。
-Copy-PayloadFile (Join-Path $config 'mixed_tokens.dict.yaml') (Join-Path $data 'mixed_tokens.dict.yaml')
+$mixedTokens = Join-Path $data 'mixed_tokens.dict.yaml'
+& (Join-Path $src 'build-support\gen-mixed-tokens.ps1') -CustomPhrase (Join-Path $config 'custom_phrase.txt') -Out $mixedTokens
+$expected = [IO.File]::ReadAllText((Join-Path $config 'mixed_tokens.dict.yaml')).Replace("`r`n", "`n")
+if ([IO.File]::ReadAllText($mixedTokens).Replace("`r`n", "`n") -cne $expected) {
+    throw 'mixed_tokens.dict.yaml 与英文白名单生成结果不同，请运行 gen-mixed-tokens.ps1 更新。'
+}
 foreach ($name in '8105','41448','base','ext','tencent','others') {
     $file = "cn_dicts\$name.dict.yaml"
     Copy-PayloadFile (Join-Path $RimeSourceDir $file) (Join-Path $data $file)
@@ -114,12 +135,17 @@ Copy-PayloadFile (Join-Path $src 'LICENSE.txt') (Join-Path $payload 'licenses\We
 Copy-PayloadFile (Join-Path $repo 'reference\librime-reference\LICENSE') (Join-Path $payload 'licenses\librime.txt')
 Copy-PayloadFile (Join-Path $RimeSourceDir 'LICENSE') (Join-Path $payload 'licenses\rime-ice.txt')
 
-# HanLinHost 是 GUI 程序（wWinMain），Start-Process -Wait 拿不到可靠退出码，改用 start /wait。
-$deployExe = Join-Path $payload 'HanLinHost.exe'
-$deployCmd = 'start /wait "" "{0}" --deploy --user-data "{1}"' -f $deployExe, $compiledProfile
-Push-Location $payload
-try { cmd.exe /d /c $deployCmd } finally { Pop-Location }
-$deployExit = $LASTEXITCODE
+$start = [Diagnostics.ProcessStartInfo]::new((Join-Path $payload 'HanLinHost.exe'))
+$start.UseShellExecute = $false
+$start.CreateNoWindow = $true
+foreach ($argument in '--deploy', '--user-data', $compiledProfile) { $start.ArgumentList.Add($argument) }
+$deploy = [Diagnostics.Process]::Start($start)
+try {
+    $deploy.WaitForExit()
+    $deployExit = $deploy.ExitCode
+} finally {
+    $deploy.Dispose()
+}
 if ($deployExit -eq 3) { throw '打包需要临时使用寒淋部署程序。请先退出正在运行的寒淋后端。' }
 if ($deployExit -ne 0) { throw "安装包词库编译失败，退出码 $deployExit。" }
 Copy-Item -LiteralPath (Join-Path $compiledProfile 'build') -Destination (Join-Path $data 'build') -Recurse
@@ -131,6 +157,9 @@ $private = @(Get-ChildItem -LiteralPath $payload -Recurse -Force | Where-Object 
     $_.Name -match '\.userdb(?:\.|$)|^(installation\.yaml|user\.yaml|sync|sogou_phrases\.txt)$'
 })
 if ($private) { throw "安装包混入用户数据 $($private[0].Name)。" }
+$dataFiles = @((Get-ChildItem -LiteralPath $data -Recurse -Force -File).FullName; (Join-Path $payload 'rime.dll'))
+$revision = Get-HanLinContentFingerprint $payload $dataFiles
+[IO.File]::WriteAllText((Join-Path $data 'hanlin-data.revision'), $revision)
 "安装包载荷 $payload"
 if ($SkipCompile) { return }
 
@@ -144,7 +173,7 @@ if (-not $iscc) {
 }
 if (-not $iscc) { throw '找不到 ISCC.exe，请先安装 Inno Setup 6.3 或更新版本。' }
 
-& $iscc "/DPayloadDir=$payload" $installer
+& $iscc "/DPayloadDir=$payload" "/O$output" $installer
 if ($LASTEXITCODE -ne 0) { throw "安装包编译失败，退出码 $LASTEXITCODE。" }
 $package = Get-Item -LiteralPath (Join-Path $output $packageName)
 if (-not $package.Length) { throw '安装包为空。' }

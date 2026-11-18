@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <string_view>
 
@@ -18,6 +19,9 @@ namespace {
 constexpr wchar_t kHostWindowClass[] = L"HanLinEngineHost";
 constexpr UINT kPresent = WM_APP + 1;
 constexpr char kSchema[] = "rime_ice";
+constexpr wchar_t kDataRevision[] = L"hanlin-data.revision";
+
+namespace fs = std::filesystem;
 
 std::wstring Wide(std::string_view text) {
   const int size = static_cast<int>(text.size());
@@ -65,7 +69,6 @@ std::wstring DefaultUserDataDirectory() {
 
 bool PrepareUserData(const std::filesystem::path& shared, const std::filesystem::path& personal,
                      bool deploy) {
-  namespace fs = std::filesystem;
   const auto preset = shared / L"preset";
   std::error_code error;
   const bool has_preset = fs::is_directory(preset, error);
@@ -74,6 +77,41 @@ bool PrepareUserData(const std::filesystem::path& shared, const std::filesystem:
   if (error || !fs::is_directory(personal, error)) return false;
   if (has_preset)
     fs::copy(preset, personal, fs::copy_options::recursive | fs::copy_options::skip_existing, error);
+  return !error;
+}
+
+std::string ReadDataRevision(const fs::path& path) {
+  char digest[65];
+  std::ifstream file(path, std::ios::binary);
+  file.read(digest, sizeof(digest));
+  if (file.gcount() != 64 || !std::all_of(digest, digest + 64, [](char ch) {
+        return (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F');
+      })) return {};
+  return std::string(digest, 64);
+}
+
+bool RemoveGeneratedCache(const fs::path& path) {
+  const auto attributes = GetFileAttributesW(path.c_str());
+  if (attributes == INVALID_FILE_ATTRIBUTES) return GetLastError() == ERROR_FILE_NOT_FOUND;
+  if (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    return false;
+  std::error_code error;
+  fs::remove_all(path, error);
+  return !error;
+}
+
+bool RecoverGeneratedCache(const fs::path& build, const fs::path& previous) {
+  std::error_code error;
+  if (fs::exists(build, error)) {
+    RemoveGeneratedCache(previous);
+    return true;
+  }
+  if (error) return false;
+  const auto attributes = GetFileAttributesW(previous.c_str());
+  if (attributes == INVALID_FILE_ATTRIBUTES) return GetLastError() == ERROR_FILE_NOT_FOUND;
+  if (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    return false;
+  fs::rename(previous, build, error);
   return !error;
 }
 
@@ -115,36 +153,53 @@ struct Session {
 class EngineHost {
  public:
   ~EngineHost() {
-    if (api_) api_->finalize();
+    Finalize();
     if (module_) FreeLibrary(module_);
   }
 
-  bool Initialize(const std::filesystem::path& engine, const std::wstring& shared,
-                  const std::wstring& personal, bool deploy) {
+  bool Load(const fs::path& engine) {
     module_ = LoadLibraryExW(engine.c_str(), nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!module_) return false;
     const auto get_api = reinterpret_cast<decltype(&rime_get_api)>(GetProcAddress(module_, "rime_get_api"));
     if (!get_api) return false;
     api_ = get_api();
-    if (!api_) return false;
+    return api_ != nullptr;
+  }
+
+  void Initialize(const std::wstring& shared, const std::wstring& personal, bool deploy,
+                  const fs::path& staging = {}) {
     const auto shared_utf8 = Utf8(shared);
     const auto personal_utf8 = Utf8(personal);
+    const auto staging_utf8 = Utf8(staging.wstring());
     RIME_STRUCT(RimeTraits, traits);
     traits.shared_data_dir = shared_utf8.c_str();
     traits.user_data_dir = personal_utf8.c_str();
+    if (!staging_utf8.empty()) traits.staging_dir = staging_utf8.c_str();
     traits.app_name = "rime.hanlin";
     traits.distribution_name = "HanLin";
     traits.distribution_code_name = "HanLin";
     traits.min_log_level = 2;
-    api_->setup(&traits);
+    if (!setup_) {
+      api_->setup(&traits);
+      setup_ = true;
+    }
     if (deploy) api_->deployer_initialize(&traits);
     else api_->initialize(&traits);
-    return true;
+    initialized_ = true;
   }
 
-  bool Deploy() {
-    if (!api_->deploy()) return false;
+  void Finalize() {
+    if (initialized_) api_->finalize();
+    initialized_ = false;
+  }
+
+  bool Deploy(bool full = true) {
+    if (full) {
+      if (!api_->deploy()) return false;
+    } else if (!RIME_API_AVAILABLE(api_, run_task) || !api_->run_task("workspace_update")) {
+      return false;
+    }
     RimeConfig schema{};
     if (!api_->schema_open(kSchema, &schema)) return false;
     const char* id = api_->config_get_cstring(&schema, "schema/schema_id");
@@ -471,6 +526,8 @@ class EngineHost {
 
   HMODULE module_ = nullptr;
   RimeApi* api_ = nullptr;
+  bool setup_ = false;
+  bool initialized_ = false;
   HWND window_ = nullptr;
   weasel::UI ui_;
   std::map<uint64_t, Session> sessions_;
@@ -512,6 +569,74 @@ int RunWindow(HINSTANCE image, EngineHost& engine, const std::wstring& personal)
   return result;
 }
 
+bool RefreshGeneratedCache(EngineHost& engine, const std::wstring& shared,
+                           const std::wstring& personal, const std::string& revision,
+                           const fs::path& build, const fs::path& previous, bool deploy) {
+  const fs::path staging = fs::path(personal) / L".hanlin-build-staging";
+  std::error_code error;
+  if (!RemoveGeneratedCache(previous) || !RemoveGeneratedCache(staging) ||
+      !fs::create_directory(staging, error)) return false;
+
+  engine.Initialize(shared, personal, true, staging);
+  const bool compiled = engine.Deploy(deploy);
+  engine.Finalize();
+  if (!compiled) {
+    RemoveGeneratedCache(staging);
+    return false;
+  }
+
+  std::ofstream stamp(staging / kDataRevision, std::ios::binary);
+  stamp << revision;
+  stamp.close();
+  if (!stamp) return false;
+
+  // Keep the previous cache until the new directory has taken its place.
+  const auto attributes = GetFileAttributesW(build.c_str());
+  if (attributes != INVALID_FILE_ATTRIBUTES) {
+    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+      return false;
+    fs::rename(build, previous, error);
+    if (error) return false;
+  } else if (GetLastError() != ERROR_FILE_NOT_FOUND) {
+    return false;
+  }
+  fs::rename(staging, build, error);
+  if (error) return false;
+  RemoveGeneratedCache(previous);
+  return true;
+}
+
+int RunEngine(HINSTANCE image, const fs::path& directory, const std::wstring& shared,
+              const std::wstring& personal, bool deploy) {
+  if (!PrepareUserData(shared, personal, deploy)) return 1;
+  const fs::path build = fs::path(personal) / L"build";
+  const fs::path previous = fs::path(personal) / L".hanlin-build-previous";
+  if (!RecoverGeneratedCache(build, previous)) return 1;
+
+  EngineHost engine;
+  if (!engine.Load(directory / L"rime.dll")) return 1;
+  const auto revision = ReadDataRevision(fs::path(shared) / kDataRevision);
+  if (deploy && revision.empty()) {
+    engine.Initialize(shared, personal, true);
+    return engine.Deploy() ? 0 : 1;
+  }
+
+  std::error_code error;
+  const bool refresh = !revision.empty() && fs::is_directory(build, error) &&
+      ReadDataRevision(build / kDataRevision) != revision;
+  if (deploy || refresh) {
+    const bool updated = RefreshGeneratedCache(engine, shared, personal, revision, build, previous, deploy);
+    if (!updated) {
+      OutputDebugStringW(L"HanLin could not refresh the compiled Rime cache.\n");
+      if (!RecoverGeneratedCache(build, previous)) return 1;
+    }
+    if (deploy) return updated ? 0 : 1;
+  }
+
+  engine.Initialize(shared, personal, false);
+  return RunWindow(image, engine, personal);
+}
+
 int RunHost(HINSTANCE image) {
   wchar_t filename[32768]{};
   const DWORD length = GetModuleFileNameW(image, filename, static_cast<DWORD>(std::size(filename)));
@@ -551,14 +676,7 @@ int RunHost(HINSTANCE image) {
   if (!mutex) return 1;
   if (GetLastError() == ERROR_ALREADY_EXISTS) { CloseHandle(mutex); return deploy ? 3 : 0; }
   const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-  int result = 1;
-  if (PrepareUserData(shared, personal, deploy)) {
-    EngineHost engine;
-    if (engine.Initialize(directory / L"rime.dll", shared, personal, deploy)) {
-      if (deploy) result = engine.Deploy() ? 0 : 1;
-      else result = RunWindow(image, engine, personal);
-    }
-  }
+  const auto result = RunEngine(image, directory, shared, personal, deploy);
   if (SUCCEEDED(initialized)) CoUninitialize();
   CloseHandle(mutex);
   return result;

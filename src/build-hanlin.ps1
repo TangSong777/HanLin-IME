@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 param(
     [string]$RendererLibrary = (Join-Path $PSScriptRoot 'msbuild\Release\x64\WeaselUI.lib'),
     [string]$EngineDll = (Join-Path $PSScriptRoot 'dist\rime.dll'),
@@ -7,12 +8,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'build-support\Find-Toolchain.ps1')
+. (Join-Path $PSScriptRoot 'build-support\HanLinBuild.ps1')
 $cmake = (Get-Command cmake.exe -CommandType Application).Source
 $boost = Get-BoostRoot
 $source = Join-Path $PSScriptRoot 'HanLin'
 $renderer = (Get-Item -LiteralPath $RendererLibrary).FullName
 $engine = (Get-Item -LiteralPath $EngineDll).FullName
 $output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputRoot)
+$version = Get-HanLinVersion (Join-Path $PSScriptRoot 'installer\HanLin.iss')
+$sourceFingerprint = Get-HanLinSourceFingerprint $PSScriptRoot
+$rendererHash = (Get-FileHash -LiteralPath $renderer).Hash
 $shared = $null
 if ($SharedDataDir) {
     $shared = (Get-Item -LiteralPath $SharedDataDir).FullName
@@ -47,3 +52,22 @@ try {
 } finally {
     Pop-Location
 }
+
+if ((Get-HanLinSourceFingerprint $PSScriptRoot) -cne $sourceFingerprint -or
+    (Get-FileHash -LiteralPath $renderer).Hash -cne $rendererHash) {
+    throw 'HanLin build inputs changed during compilation. Rebuild before packaging.'
+}
+$hashes = [ordered]@{}
+foreach ($artifact in (Get-HanLinBuildArtifacts).GetEnumerator()) {
+    $hashes[$artifact.Key] = (Get-FileHash -LiteralPath (Join-Path $output $artifact.Value)).Hash
+}
+$manifest = [ordered]@{
+    version = $version
+    sourceFingerprint = $sourceFingerprint
+    rendererSha256 = $rendererHash
+    artifacts = $hashes
+}
+$manifestFile = Join-Path $output 'HanLinBuild.json'
+$pendingManifest = "$manifestFile.$([Guid]::NewGuid().ToString('N')).tmp"
+[IO.File]::WriteAllText($pendingManifest, ($manifest | ConvertTo-Json))
+[IO.File]::Move($pendingManifest, $manifestFile, $true)

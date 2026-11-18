@@ -2,20 +2,18 @@
 
 > 本文件由 `src/build-support/gen-word-table.ps1` 从实际词条文件生成，**请勿手工编辑**。
 >
-> 生成时间：2026-11-18 19:13
+> 生成时间：2026-11-18 20:57
 
 ## 概览
 
-> 英文白名单参与造句：`mixed_tokens` 由 `custom_phrase.txt` 生成，只有下表里的白名单词会进入句子，`cn_en` 与任意英文单词不会。
+> 造句词表 `mixed_tokens` 由 `custom_phrase.txt` 和额外词条生成。
 
 | 类别 | 数量 | 输入方式 | 参与造句 |
 |---|---:|---|---|
-| 英文白名单 | 91 | 全小写编码 | ✅（同时也是词典词条） |
+| 英文白名单 | 91 | 小写编码 | 73 条 |
 | 中文短码 | 22 | 单/双字母 | — |
-| 数字词条 | 100000（0–99999） | **小键盘**数字 | ✅ |
+| 动态数字 | 引擎识别 | 小键盘数字 | ✅ |
 | **合计自维护词条** | 113 | — | — |
-
-> 数字词条由脚本批量生成，不逐条列出；范围可改（见文末）。
 
 ## 英文白名单（91 条）
 
@@ -115,15 +113,17 @@
 | 90 | WorkSpace | `workspace` | 工具/其他 | ✅ |
 | 91 | ZeroTier | `zerotier` | 工具/其他 | ✅ |
 
-## 其它参与造句的词条（3 条）
+## 其它参与造句的词条（5 条）
 
-数字需用**小键盘**输入；它们同样参与造句。
+编码中的数字用小键盘输入。
 
 | # | 词条 | 编码 | 权重 |
 |---:|---|---|---:|
 | 1 | ESP32 | `esp32` | 100000 |
 | 2 | STM32 | `stm32` | 100000 |
-| 3 | 杨寒淋 | `yanghanlin` | 100000 |
+| 3 | STM32CubeIDE | `stm32cubeide` | 1000 |
+| 4 | STM32CubeMX | `stm32cubemx` | 1000 |
+| 5 | 杨寒淋 | `yanghanlin` | 100000 |
 
 ## 中文短码（22 条 / 16 个编码）
 
@@ -148,40 +148,23 @@
 | 15 | `uuuu` | 「又双叒叕」 | 网络梗「又双叒叕」 |
 | 16 | `yanghanlin` | 「杨寒淋」 | 常用简拼 |
 
-## 数字词条
-
-由 `numeric.dict.yaml` 覆盖 **0–99999**，共 100000 条，权重统一 1000。
-
-它们的作用是让数字能像音节一样参与造句：
-
-```
-youyijianshiqingshishuo32meiyou26da  →  有一件事情是说32没有26大
-```
-
-需要更大范围时重新生成（会增大词库和部署时间）：
-
-```powershell
-pwsh -File .\src\build-support\gen-numeric-dict.ps1 -Max 999999
-```
-
 ## 使用规则
 
 | 规则 | 说明 |
 |---|---|
 | 编码一律小写 | 打 `CPU` 得到的是大写字母造词，不是词条 |
 | 编码与词条都不含空格 | `visualstudio`、`platformio` |
-| 含数字的词编码去数字 | `STM32CubeMX` → `stmcubemx`；数字编码本身要用小键盘 |
+| 型号支持数字与部分短码 | `STM32CubeMX` 可用 `stm32cubemx` 或 `stmcubemx` |
 | 主键盘数字只选词 | 1–9（0 = 第 10 个）永远是选词，不会进入编码 |
 | 小键盘数字才输入数字 | `KP_0`–`KP_9` 参与拼写与造句 |
-| 英文词条可参与造句 | 如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |
+| 英文白名单可参与造句 | 如 `wozhendehenxihuanshiyongcodexzhezhonggongju` → 「我真的很喜欢使用Codex这种工具」 |
 
 ## 如何增删词条
 
 | 想改什么 | 改哪里 | 之后做什么 |
 |---|---|---|
 | 英文词 / 中文短码 | `custom_phrase.txt`（`词条<Tab>编码`） | 重新部署 |
-| 恢复英文造句 | 取消 `rime_ice.dict.yaml` 里 `- mixed_tokens` 的注释 | 重新部署 |
-| 数字范围 | 重跑 `gen-numeric-dict.ps1` | 重新部署 |
+| 造句词条 | 从 `custom_phrase.txt` 重新生成 `mixed_tokens.dict.yaml` | 重新部署 |
 | 本表格 | 重跑 `gen-word-table.ps1` | 提交 |
 
 ---

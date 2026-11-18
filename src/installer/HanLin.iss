@@ -1,6 +1,6 @@
 ﻿#define MyAppName "寒淋输入法"
-#define MyAppVersion "0.2.1"
-#define MyAppVersionQuad "0.2.1.0"
+#define MyAppVersion "0.2.2"
+#define MyAppVersionQuad MyAppVersion + ".0"
 #define MyAppPublisher "TangSong777"
 #define MyAppURL "https://github.com/TangSong777/HanLin-IME"
 
@@ -46,6 +46,7 @@ Name: "skin"; Description: "安装现有 Color-P 候选皮肤"; GroupDescription
 [Files]
 Source: "{#PayloadDir}\HanLinHost.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\rime.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\Migrate-HanLinUserData.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\x64\HanLinTip.dll"; DestDir: "{app}\x64"; Flags: ignoreversion regserver 64bit
 Source: "{#PayloadDir}\x86\HanLinTip.dll"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit
 Source: "{#PayloadDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs

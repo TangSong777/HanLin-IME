@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.22)
 project(HanLin LANGUAGES CXX RC)
 
+set(installer "${CMAKE_CURRENT_SOURCE_DIR}/../installer/HanLin.iss")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${installer}")
+file(STRINGS "${installer}" version_line REGEX "^#define MyAppVersion ")
+if(NOT version_line MATCHES "^#define MyAppVersion \"([0-9]+\\.[0-9]+\\.[0-9]+)\"$")
+  message(FATAL_ERROR "Could not read MyAppVersion from HanLin.iss")
+endif()
+set(HANLIN_VERSION "${CMAKE_MATCH_1}")
+string(REPLACE "." "," HANLIN_VERSION_NUMBERS "${HANLIN_VERSION}.0")
+configure_file(HanLinVersionDefs.h.in HanLinVersionDefs.h @ONLY)
+include_directories("${CMAKE_CURRENT_BINARY_DIR}")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

@@ -3,18 +3,15 @@
 # 数据来源（唯一事实来源，不手工抄写）：
 #   custom_phrase.txt        —— 英文白名单 + 中文短码
 #   mixed_tokens.dict.yaml   —— 参与造句的英文词条
-#   numeric.dict.yaml        —— 数字词条（只统计范围，不逐条列出）
 #
 # 用法：
 #   pwsh -File .\src\build-support\gen-word-table.ps1 `
 #       -CustomPhrase <用户目录>\custom_phrase.txt `
 #       -MixedTokens  <用户目录>\mixed_tokens.dict.yaml `
-#       -NumericDict  <用户目录>\numeric.dict.yaml `
 #       -Out          <仓库>\docs\CUSTOM-WORDS.md
 param(
   [string]$CustomPhrase = (Join-Path $env:APPDATA 'Rime\custom_phrase.txt'),
   [string]$MixedTokens  = (Join-Path $env:APPDATA 'Rime\mixed_tokens.dict.yaml'),
-  [string]$NumericDict  = (Join-Path $env:APPDATA 'Rime\numeric.dict.yaml'),
   [string]$Out          = (Join-Path (Split-Path $PSScriptRoot -Parent | Split-Path -Parent) 'docs\CUSTOM-WORDS.md')
 )
 
@@ -71,17 +68,9 @@ if (Test-Path $MixedTokens) {
     $tokens += [pscustomobject]@{ Word = $p[0]; Code = $p[1]; Weight = $(if ($p.Count -gt 2) { $p[2] } else { '' }) }
   }
 }
-$tokenCodes = @{}
-foreach ($t in $tokens) { $tokenCodes[$t.Code] = $true }
-
-# ---- 读 numeric.dict.yaml 的范围 ----
-$numMin = $null; $numMax = $null; $numCount = 0
-if (Test-Path $NumericDict) {
-  $numLines = [IO.File]::ReadAllLines($NumericDict, $enc) | Where-Object { $_ -match '^\d+\t' }
-  $numCount = ($numLines | Measure-Object).Count
-  $nums = $numLines | ForEach-Object { [int]($_ -split "`t")[0] }
-  if ($numCount) { $numMin = ($nums | Measure-Object -Minimum).Minimum; $numMax = ($nums | Measure-Object -Maximum).Maximum }
-}
+$tokenPairs = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+foreach ($t in $tokens) { [void]$tokenPairs.Add("$($t.Word)`t$($t.Code)") }
+$sentenceCount = @($english | Where-Object { $tokenPairs.Contains("$($_.Word)`t$($_.Code)") }).Count
 
 $now = Get-Date -Format 'yyyy-MM-dd HH:mm'
 $sb = New-Object System.Text.StringBuilder
@@ -96,18 +85,14 @@ Add-Line "> 生成时间：$now"
 Add-Line ''
 Add-Line '## 概览'
 Add-Line ''
-Add-Line '> 英文白名单参与造句：`mixed_tokens` 由 `custom_phrase.txt` 生成，只有下表里的白名单词会进入句子，`cn_en` 与任意英文单词不会。'
+Add-Line '> 造句词表 `mixed_tokens` 由 `custom_phrase.txt` 和额外词条生成。'
 Add-Line ''
 Add-Line '| 类别 | 数量 | 输入方式 | 参与造句 |'
 Add-Line '|---|---:|---|---|'
-Add-Line "| 英文白名单 | $($english.Count) | 全小写编码 | ✅（同时也是词典词条） |"
+Add-Line "| 英文白名单 | $($english.Count) | 小写编码 | $sentenceCount 条 |"
 Add-Line "| 中文短码 | $($chinese.Count) | 单/双字母 | — |"
-if ($numCount) {
-  Add-Line "| 数字词条 | $numCount（$numMin–$numMax） | **小键盘**数字 | ✅ |"
-}
+Add-Line '| 动态数字 | 引擎识别 | 小键盘数字 | ✅ |'
 Add-Line "| **合计自维护词条** | $($english.Count + $chinese.Count) | — | — |"
-Add-Line ''
-Add-Line '> 数字词条由脚本批量生成，不逐条列出；范围可改（见文末）。'
 Add-Line ''
 
 # ---- 英文白名单 ----
@@ -121,7 +106,7 @@ $i = 0
 $ordered = $english | Sort-Object @{ Expression = { $categories.Keys.IndexOf((Get-Category $_.Word)) } }, Word
 foreach ($e in $ordered) {
   $i++
-  $join = if ($tokenCodes.ContainsKey($e.Code)) { '✅' } else { '—' }
+  $join = if ($tokenPairs.Contains("$($e.Word)`t$($e.Code)")) { '✅' } else { '—' }
   Add-Line "| $i | $($e.Word) | ``$($e.Code)`` | $(Get-Category $e.Word) | $join |"
 }
 Add-Line ''
@@ -134,7 +119,7 @@ $extraTokens = @($tokens | Where-Object {
 if ($extraTokens.Count) {
   Add-Line "## 其它参与造句的词条（$($extraTokens.Count) 条）"
   Add-Line ''
-  Add-Line '数字需用**小键盘**输入；它们同样参与造句。'
+  Add-Line '编码中的数字用小键盘输入。'
   Add-Line ''
   Add-Line '| # | 词条 | 编码 | 权重 |'
   Add-Line '|---:|---|---|---:|'
@@ -174,26 +159,6 @@ foreach ($code in $groups.Keys) {
 }
 Add-Line ''
 
-# ---- 数字 ----
-if ($numCount) {
-  Add-Line '## 数字词条'
-  Add-Line ''
-  Add-Line "由 ``numeric.dict.yaml`` 覆盖 **$numMin–$numMax**，共 $numCount 条，权重统一 1000。"
-  Add-Line ''
-  Add-Line '它们的作用是让数字能像音节一样参与造句：'
-  Add-Line ''
-  Add-Line '```'
-  Add-Line 'youyijianshiqingshishuo32meiyou26da  →  有一件事情是说32没有26大'
-  Add-Line '```'
-  Add-Line ''
-  Add-Line '需要更大范围时重新生成（会增大词库和部署时间）：'
-  Add-Line ''
-  Add-Line '```powershell'
-  Add-Line 'pwsh -File .\src\build-support\gen-numeric-dict.ps1 -Max 999999'
-  Add-Line '```'
-  Add-Line ''
-}
-
 # ---- 使用规则 ----
 Add-Line '## 使用规则'
 Add-Line ''
@@ -201,10 +166,10 @@ Add-Line '| 规则 | 说明 |'
 Add-Line '|---|---|'
 Add-Line '| 编码一律小写 | 打 `CPU` 得到的是大写字母造词，不是词条 |'
 Add-Line '| 编码与词条都不含空格 | `visualstudio`、`platformio` |'
-Add-Line '| 含数字的词编码去数字 | `STM32CubeMX` → `stmcubemx`；数字编码本身要用小键盘 |'
+Add-Line '| 型号支持数字与部分短码 | `STM32CubeMX` 可用 `stm32cubemx` 或 `stmcubemx` |'
 Add-Line '| 主键盘数字只选词 | 1–9（0 = 第 10 个）永远是选词，不会进入编码 |'
 Add-Line '| 小键盘数字才输入数字 | `KP_0`–`KP_9` 参与拼写与造句 |'
-Add-Line '| 英文词条可参与造句 | 如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |'
+Add-Line '| 英文白名单可参与造句 | 如 `wozhendehenxihuanshiyongcodexzhezhonggongju` → 「我真的很喜欢使用Codex这种工具」 |'
 Add-Line ''
 
 # ---- 维护方式 ----
@@ -213,8 +178,7 @@ Add-Line ''
 Add-Line '| 想改什么 | 改哪里 | 之后做什么 |'
 Add-Line '|---|---|---|'
 Add-Line '| 英文词 / 中文短码 | `custom_phrase.txt`（`词条<Tab>编码`） | 重新部署 |'
-Add-Line '| 恢复英文造句 | 取消 `rime_ice.dict.yaml` 里 `- mixed_tokens` 的注释 | 重新部署 |'
-Add-Line '| 数字范围 | 重跑 `gen-numeric-dict.ps1` | 重新部署 |'
+Add-Line '| 造句词条 | 从 `custom_phrase.txt` 重新生成 `mixed_tokens.dict.yaml` | 重新部署 |'
 Add-Line '| 本表格 | 重跑 `gen-word-table.ps1` | 提交 |'
 Add-Line ''
 Add-Line '---'
@@ -225,4 +189,4 @@ New-Item -ItemType Directory -Force -Path (Split-Path $Out -Parent) | Out-Null
 [IO.File]::WriteAllText($Out, $sb.ToString(), $enc)
 
 Write-Host "生成 $Out"
-Write-Host "  英文 $($english.Count) 条 / 中文 $($chinese.Count) 条 / 型号 $($extraTokens.Count) 条 / 数字 $numCount 条"
+Write-Host "  英文 $($english.Count) 条 / 中文 $($chinese.Count) 条 / 造句 $($tokens.Count) 条"

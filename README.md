@@ -6,9 +6,9 @@
 
 | | |
 |---|---|
-| 版本 | `0.2.0` |
+| 版本 | `0.2.2` |
 | 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
-| 本地测试包 | `HanLin-Setup-0.2.0.exe`，适用于 x64 Windows |
+| 本地测试包 | `HanLin-Setup-0.2.2.exe`，适用于 x64 Windows |
 | 许可证 | GPL-3.0（代码）· 皮肤素材版权归原作者 |
 
 ## 目录
@@ -40,7 +40,7 @@
 
 ## 快速开始
 
-1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-0.2.0.exe`。
+1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-0.2.2.exe`。
 2. 在 Windows 输入法列表选择「寒淋输入法」。
 3. 打一段拼音验证候选。
 
@@ -103,17 +103,17 @@ woshi        →  选「我是」
 候选框外：Shift+-  →  ——
 ```
 
-`-` 与 `_` 在输入串里是**字面量**，不转中文标点，也不参与组词——Rime 的 speller 只认声母+韵母组成的音节，符号成不了音节，会被当分隔符（候选按 `-` 前后分段）。没有候选框时仍遵循中文标点规则。
+`-` 与 `_` 在组合中按字面量参与造句。独立输入时沿用中文标点规则。
 
 ### 混合造句
 
-输入串中可以同时出现拼音、数字与**白名单英文词**，由 Rime 的语言模型直接组成一句：
+拼音、数字、符号和支持造句的白名单词可以组成同一个候选。
 
 ```
 wozhendehenxihuanshiyongcodexzhezhonggongju  →  我真的很喜欢使用Codex这种工具
 esp32bistm32haoyong                          →  ESP32比STM32好用
 youyijianshiqingshishuo32meiyou26da          →  有一件事情是说32没有26大
-arduinoqishiyejiunayang                      →  Arduino其实也就那样
+keai，sunxiaochuan258。nihao                  →  可爱，孙笑川258。你好
 ```
 
 > 上面例子里的数字都来自**小键盘**。真实打字时主键盘数字会被当作选词键，
@@ -122,11 +122,11 @@ arduinoqishiyejiunayang                      →  Arduino其实也就那样
 | 组成 | 状态 | 作用 |
 |---|---|---|
 | `speller/alphabet` 含 `0-9` | 启用 | 数字可作为拼写字符进入输入串 |
-| `numeric.dict.yaml`（0–99999） | 启用 | 任意数字都能作为音节参与造句 |
-| `mixed_tokens.dict.yaml` | 启用 | **仅** `custom_phrase.txt` 里的白名单词与 ESP32 / STM32 参与造句 |
+| 引擎动态数字识别 | 启用 | 连续数字按原样参与造句，保留前导零 |
+| 引擎符号识别 | 启用 | 保留输入时的符号形态并参与造句 |
+| `mixed_tokens.dict.yaml` | 启用 | 符合条件的英文白名单、型号和专名参与造句 |
 
-英文混排**只认白名单**：`mixed_tokens` 由 `custom_phrase.txt` 生成，词条数就是白名单词条数，
-不会把 `cn_en` 的 1000 多条中英混排词或任意英文单词带进句子。
+`mixed_tokens` 从 `custom_phrase.txt` 生成。编码以 `a`、`e`、`i`、`o`、`u`、`v` 开头的英文词通过精确码和前缀补全调出。
 
 数字的来源按按键区分：**小键盘数字参与拼写，主键盘数字只用于选词**。
 
@@ -142,7 +142,7 @@ arduinoqishiyejiunayang                      →  Arduino其实也就那样
 
 白名单为科技厂商、开发工具、语言与常用软件，按规范大小写写入，**用小写编码输入**。完整清单（编码、分类、是否参与造句）见 **[自定义字词总表](docs/CUSTOM-WORDS.md)**。
 
-编码遵循两条约束：不含空格（`visualstudio`、`platformio`）；含数字的词去掉数字作编码（`stmcubemx`），因为主键盘数字是选词键。
+编码连续输入，例如 `visualstudio`、`platformio`。`STM32CubeMX` 可用小键盘数字输入 `stm32cubemx`，也可以输入短码 `stmcubemx`。
 
 前缀补全拆成两个翻译器，是为了避免高权重补全挤占单字母输入：`custom_phrase` 权重 99、关闭补全，负责精确码；`custom_phrase_complete` 权重 0.9、开启补全，负责 `chat` → `ChatGPT`。
 
@@ -210,7 +210,7 @@ cC 1 0 0 / 4      →  100/4=25.0
 静默安装（需在已提权终端中运行）：
 
 ```powershell
-HanLin-Setup-0.2.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
+HanLin-Setup-0.2.2.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 ```
 
 ### 安装布局
@@ -314,9 +314,8 @@ nihaowoshiyanghanlin         →  Enter 或 Shift+Enter 都上屏 nihaowoshiyang
 | `default.custom.yaml` | 方案列表与全局快捷键 |
 | `rime_ice.custom.yaml` | 处理器/翻译器覆盖、按键绑定、英文分层、时间戳禁用、`speller/alphabet` |
 | `custom_phrase.txt` | 英文白名单与中文短码（`词条<Tab>编码`） |
-| `mixed_tokens.dict.yaml` | 可参与造句的词条（由白名单脚本派生；当前停用） |
-| `numeric.dict.yaml` | 0–99999 数字词条（脚本生成） |
-| `rime_ice.dict.yaml` | 词库挂载表，含大字表与上述两个词条 |
+| `mixed_tokens.dict.yaml` | 可参与造句的词条，由白名单脚本生成 |
+| `rime_ice.dict.yaml` | 词库挂载表，包含大字表和 `mixed_tokens` |
 | `lua/keypad_input.lua` | 小键盘与数字混合输入处理器 |
 | `lua/dedupe_filter.lua` | 合并「文本与注释都相同」的重复候选 |
 | `lua/lowercase_candidate_filter.lua` | 英文候选后追加全小写版本 |
@@ -324,12 +323,11 @@ nihaowoshiyanghanlin         →  Enter 或 Shift+Enter 都上屏 nihaowoshiyang
 
 ### 白名单与词条
 
-白名单与 `mixed_tokens` 是同一来源的两份数据：后者由 `gen-mixed-tokens.ps1` 从 `custom_phrase.txt` 派生。只改前者，`custom_phrase` 能出词但**不能造句**。
-
-数字词条范围可调（会增大词库与部署时间）：
+修改 `custom_phrase.txt` 后，重新生成 `mixed_tokens.dict.yaml`，词条才能参与造句。打包时会检查生成结果。
 
 ```powershell
-pwsh -File .\src\build-support\gen-numeric-dict.ps1 -Max 99999
+pwsh -File .\src\build-support\gen-mixed-tokens.ps1 `
+    -CustomPhrase .\rime-config\custom_phrase.txt -Out .\rime-config\mixed_tokens.dict.yaml
 ```
 
 完整词条清单见 [自定义字词总表](docs/CUSTOM-WORDS.md)（由 `gen-word-table.ps1` 生成，勿手改）。
@@ -342,8 +340,7 @@ pwsh -File .\src\build-support\gen-numeric-dict.ps1 -Max 99999
 |---|---|---|---|
 | 精确词条 | `initial_quality: 99` | `rime_ice.custom.yaml` → `custom_phrase` | 精确码（`chatgpt`）稳定首位 |
 | 前缀补全 | `initial_quality: 0.9` | `rime_ice.custom.yaml` → `custom_phrase_complete` | 补全（`chat`）能选到，但排在拼音之后 |
-| 造句词条 | 第三列 `1000` / `100000` | `mixed_tokens.dict.yaml` | 白名单词 1000；型号与人名 100000 |
-| 数字词条 | 第三列 `1000` | `numeric.dict.yaml` | 0–99999 |
+| 造句词条 | 第三列 `1000` / `100000` | `mixed_tokens.dict.yaml` | 一般词条 1000，ESP32、STM32 和专名 100000 |
 | 词库整体 | 列表顺序 | `rime_ice.dict.yaml` → `import_tables` | 越靠前权重越高 |
 
 拼音译文器的默认权重约 `1.2`，高于补全的 `0.9`，所以单字母输入仍是中文优先：
@@ -364,81 +361,19 @@ chat → ChatGPT 出现在中文之后，但可以选到
 
 ### 迁移整套配置
 
-把当前这套「词库 + 权重 + 设置」原样搬到另一处，按目标分两种场景。
+可以把小狼毫用户目录或其备份里的自定义配置、短语和学习词频迁入寒淋。之前导入小狼毫的搜狗短语随 `sogou_phrases.txt` 和对应的方案配置一起迁移。
 
-#### A. 搬到另一台机器（连同输入法本体）
-
-适用于换电脑、重装系统。
-
-1. 新机器安装同版本安装包 `HanLin-Setup-0.2.0.exe`。
-2. 托盘菜单 →「退出」，确认 `WeaselServer.exe` 已结束（否则文件被占用）
-3. 把下表文件覆盖到新机器的 Rime 用户目录（托盘菜单 →「用户文件夹」）
-4. 确认 `weasel.custom.yaml` 的 `style/ssf_skin` 指向新机器实际皮肤路径
-5. 托盘菜单 →「重新部署」
-6. 重新启动 `WeaselServer.exe`
-
-#### B. 搬到已有小狼毫（只搬配置与词库）
-
-适用于同事/另一台已装官方小狼毫的机器，只要输入行为一致。
-
-1. 备份对方原有的 Rime 用户目录
-2. 按上表复制文件（**不含**输入法本体，皮肤需要另外准备）
-3. 若对方没有大字表，`rime_ice.dict.yaml` 里 `cn_dicts/41448` 一行会找不到文件；要么补齐词库，要么先注释掉
-4. 重新部署
-
-#### 必带文件清单
-
-| 文件 | 作用 | 属于 |
-|---|---|---|
-| `rime_ice.custom.yaml` | **权重与全部行为开关**（处理器/翻译器顺序、按键、时间戳禁用、补全分层、`alphabet`、过滤器） | 本项目独有 |
-| `custom_phrase.txt` | 91 个英文白名单 + 22 个中文短码 | 本项目独有 |
-| `mixed_tokens.dict.yaml` | 参与造句的词条（含权重列；当前停用） | 本项目独有 |
-| `numeric.dict.yaml` | 0–99999 数字词条（1.7 MB） | 本项目独有 |
-| `rime_ice.dict.yaml` | 词库挂载表与顺序（**权重顺序就在这里**） | 本项目改过 |
-| `lua/keypad_input.lua` | 小键盘与数字混合输入 | 本项目独有 |
-| `lua/dedupe_filter.lua` | 候选去重 | 本项目独有 |
-| `lua/lowercase_candidate_filter.lua` | 英文候选后追加全小写版本 | 本项目独有 |
-| `lua/short_prefix_filter.lua` | 抑制单字母前缀补全误触 | 本项目独有 |
-| `weasel.custom.yaml` | SSF 皮肤、配色、布局 | 本项目独有 |
-| `default.custom.yaml` | 方案列表与全局快捷键 | 按需 |
-
-其余 `lua/*.lua`（`corrector`、`pin_cand_filter`、`calc_translator` 等）与 `cn_dicts/`、`en_dicts/`、`opencc/` 都是 **rime-ice 上游内容**，随安装包分发，正常安装即可，不需要单独搬。
-
-#### 可以不带的东西
-
-| 内容 | 原因 |
-|---|---|
-| `installation.yaml` / `user.yaml` | 本机安装信息，带过去会指向错误的目录 |
-| `sync/` | 同步快照；两边同时存在时，重新部署可能把词频回退成旧值 |
-| `build/` | 编译缓存，重新部署会自动重建 |
-| `*.userdb/` | 用户词典与调频记录。**想保留自己的用词习惯就带上**，只想要干净初始状态则跳过 |
-
-#### 迁移后校验
+先退出正在使用来源目录的小狼毫，再运行随寒淋安装的脚本。这里以 `D:\RimeUser` 为例。
 
 ```powershell
-# 1. 词条数量对不对（应为 英文 91 / 中文 22）
-pwsh -File .\src\build-support\gen-word-table.ps1 `
-    -CustomPhrase <新目录>\custom_phrase.txt `
-    -MixedTokens <新目录>\mixed_tokens.dict.yaml `
-    -NumericDict <新目录>\numeric.dict.yaml `
-    -Out <临时文件>
-
-# 2. 走真实输入链路验证候选与权重
-.\src\dist\dict-probe.exe <新用户目录副本> <安装目录>\data --query chatgpt --limit 3
-.\src\dist\dict-probe.exe <新用户目录副本> <安装目录>\data --query g --limit 5
+$install = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\HanLin' -Name InstallRoot).InstallRoot
+Start-Process -FilePath (Join-Path $install 'HanLinHost.exe') -ArgumentList '--stop' -Wait
+pwsh -NoProfile -File (Join-Path $install 'Migrate-HanLinUserData.ps1') -Source 'D:\RimeUser'
 ```
 
-预期：`chatgpt` 首位是 `ChatGPT` 且只有一条；`g` 首位仍是中文；
-带数字的句子要按**真实按键序列**验证（数字必须走小键盘，主键盘数字会被当作选词）：
+省略 `-Source` 时，脚本读取小狼毫设置中的用户目录。可用 `-Destination` 指定一个新目录，或加 `-NoActivate` 仅生成迁移副本。寒淋已有用户目录时，默认在旁边建立一个新目录。
 
-```powershell
-.\src\dist\dict-probe.exe <新用户目录副本> <安装目录>\data `
-    --query "esp{KP_3}{KP_2}bistm{KP_3}{KP_2}haoyong" --limit 3
-# 预期：ESP32比STM32好用
-```
-
-> 探针的 `--query` 若直接写 `esp32bistm32haoyong`（不指定按键），数字会被当成普通字符一次性解析，
-> 分段结果与逐键输入不同，不能用来判断真实打字行为。
+脚本保留本地配置、词表和用户词典的优先级，并生成新的部署缓存与安装标识。来源目录和原寒淋用户目录均可继续使用。脚本打印原寒淋用户目录。要切回时，先退出寒淋后端，再将 `HKCU:\Software\HanLin` 的 `UserDataDir` 改回该路径。
 
 
 ## 已知限制
@@ -449,7 +384,7 @@ pwsh -File .\src\build-support\gen-word-table.ps1 `
 |---|---|
 | 输入框外无法切换中英文 | 无 TSF 会话；本项目不含键鼠钩子 |
 | 裸 `Shift` 仅在输入框内短按生效 | librime `ascii_composer` 的既有行为，本项目未改动引擎 |
-| `-` 与 `_` 是**候选框内**仅有的两个 ASCII 例外 | 有意设计：写进输入串时保持字面量、不转中文标点；不参与组词（符号无法成为 Rime 音节）；没有候选框时 `Shift+-` 仍输出 `——` |
+| 组合中输入 `-` 或 `_` | 符号以原样参与造句。候选翻页后按 `-` 返回上一页 |
 | `Tab` 在拼音组合中用于移动光标 | 有意映射 |
 | 方向键在输入串两端环绕 | librime 1.13.1 限制（`_no_loop` 需 ≥ 1.16） |
 | 中文模式下主键盘 `.` 输出 `。` | 标点形态由中英模式决定；小数点请用小键盘 `KP_Decimal` |
@@ -529,16 +464,16 @@ rime-ice 默认把 `ts` 作为 Unix 时间戳触发码，而它同时是「唐�
 
 ### 构建
 
-使用 Visual Studio 2022、Windows SDK、Boost 1.82、CMake 和 Ninja。寒淋复用 `WeaselUI.lib`。已构建的 librime 1.17.0 DLL 可通过 `-EngineDll` 指定，默认取 `src\dist\rime.dll`。
+使用 PowerShell 7、Visual Studio 2022、Windows SDK、Boost 1.82、CMake 和 Ninja。构建寒淋前端需要 x64 的 `WeaselUI.lib` 和寒淋定制的 librime 1.17.0 `rime.dll`。全新克隆请从同系列已安装的寒淋中取出定制 DLL，或用本项目引擎源码及 librime-lua 构建后通过 `-EngineDll` 提供。渲染库的编译依赖见 [构建小狼毫](docs/build-weasel.md)。
 
 ```powershell
 git clone https://github.com/TangSong777/HanLin-IME.git
 cd HanLin-IME
 pwsh -NoProfile -File .\src\build-weasel.ps1
-pwsh -NoProfile -File .\src\build-hanlin.ps1
+pwsh -NoProfile -File .\src\build-hanlin.ps1 -EngineDll 'C:\Program Files\HanLin\rime.dll'
 ```
 
-寒淋产物位于 `src\output\hanlin-tip-x64` 和 `src\output\hanlin-tip-x86`。x64 目录也包含 `HanLinHost.exe` 与 `rime.dll`。
+寒淋产物位于 `src\output\hanlin-tip-x64` 和 `src\output\hanlin-tip-x86`。x64 目录也包含 `HanLinHost.exe` 与 `rime.dll`。`src\output\HanLinBuild.json` 记录前端源码指纹、版本和产物哈希。
 
 `weasel.props` 由脚本自动生成。环境特殊时可用下列变量覆盖，并加 `-RegenerateProps` 重新生成：
 
@@ -557,7 +492,9 @@ pwsh -NoProfile -File .\src\build-hanlin.ps1
 pwsh -File .\src\installer\build-installer.ps1 -SharedDataDir <Rime共享数据目录> -RimeSourceDir <雾凇拼音源目录>
 ```
 
-打包程序从共享数据和雾凇源目录预编译随包词库。编译时需退出寒淋后台。生成的离线安装包位于 `src\installer\output\HanLin-Setup-0.2.0.exe`，个人词库、同步目录和搜狗导入短语均留在用户目录。
+打包程序先校验构建记录和白名单，再从共享数据与雾凇源目录预编译随包词库。编译时需退出寒淋后端。用 `-BuildRoot` 指定前端构建目录，用 `-OutputDir` 指定安装包输出目录。默认输出到 `src\installer\output`，文件名由版本号生成。
+
+寒淋启动时用随包数据指纹检查个人编译缓存。数据变化时按当前用户配置重编缓存，成功后替换。重编失败时沿用旧缓存，下次启动重试。全新用户目录直接使用安装包中的预编译词库。
 
 ### 测试
 
@@ -640,8 +577,7 @@ D:\Rime\                     # 仓库根 = 小狼毫安装目录
 | 目标 | 修改 | 之后 |
 |---|---|---|
 | 英文词 / 中文短码 | `rime-config/custom_phrase.txt`（`词条<Tab>编码`） | 重新部署 |
-| 让英文词参与造句 | 取消 `rime_ice.dict.yaml` 里 `- mixed_tokens` 的注释 | 重新部署 |
-| 调整数字范围 | 重跑 `gen-numeric-dict.ps1` | 重新部署 |
+| 更新参与造句的白名单词 | 从 `custom_phrase.txt` 重新生成 `mixed_tokens.dict.yaml` | 重新部署 |
 | 更新词表文档 | 重跑 `gen-word-table.ps1` | 提交 `docs/CUSTOM-WORDS.md` |
 
 ### 词库
@@ -650,8 +586,7 @@ D:\Rime\                     # 仓库根 = 小狼毫安装目录
 
 ```yaml
 import_tables:
-  # - mixed_tokens      # 参与造句的英文/型号（当前停用）
-  - numeric             # 数字
+  - mixed_tokens      # 参与造句的英文、型号和专名
   - cn_dicts/8105       # 字表
   - cn_dicts/41448      # 大字表
   - cn_dicts/base       # 基础词库
@@ -737,12 +672,11 @@ git add -A && git commit -m "<一句话>" && git push
 
 # ── 发版：全程在 snapshot 上 ──
 # 1. 读 PENDING-CHANGES.md 汇总，写入 CHANGELOG.md
-# 2. 改版本号（两处，必须一致）
-#    src\installer\HanLin.iss        -> MyAppVersion / MyAppVersionQuad
-#    src\HanLin\HanLinVersion.rc       -> FILEVERSION / PRODUCTVERSION
+# 2. 更新 src\installer\HanLin.iss 的 MyAppVersion
 # 3. 清空账本，提交推送
 git add -A && git commit -m "发布 <版本>" && git push
-# 4. 打包并核对（版本资源、载荷哈希）
+# 4. 重建前端、打包并核对（版本资源、载荷哈希）
+pwsh -File .\src\build-hanlin.ps1
 pwsh -File .\src\installer\build-installer.ps1
 # 5. 合并到 master（只允许快进）
 git checkout master && git merge --ff-only snapshot && git push
