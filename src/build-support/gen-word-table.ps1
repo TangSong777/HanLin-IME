@@ -96,7 +96,7 @@ Add-Line "> 生成时间：$now"
 Add-Line ''
 Add-Line '## 概览'
 Add-Line ''
-Add-Line '> 2026-11-10 起英文白名单停用造句（`rime_ice.dict.yaml` 未导入 `mixed_tokens`）；下表「参与造句 ✅」只表示词条具备该能力，恢复导入后才实际生效。'
+Add-Line '> 英文白名单参与造句：`mixed_tokens` 由 `custom_phrase.txt` 生成，只有下表里的白名单词会进入句子，`cn_en` 与任意英文单词不会。'
 Add-Line ''
 Add-Line '| 类别 | 数量 | 输入方式 | 参与造句 |'
 Add-Line '|---|---:|---|---|'
@@ -204,7 +204,7 @@ Add-Line '| 编码与词条都不含空格 | `visualstudio`、`platformio` |'
 Add-Line '| 含数字的词编码去数字 | `STM32CubeMX` → `stmcubemx`；数字编码本身要用小键盘 |'
 Add-Line '| 主键盘数字只选词 | 1–9（0 = 第 10 个）永远是选词，不会进入编码 |'
 Add-Line '| 小键盘数字才输入数字 | `KP_0`–`KP_9` 参与拼写与造句 |'
-Add-Line '| 英文词条可参与造句 | 需先恢复 `mixed_tokens` 导入；停用前如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |'
+Add-Line '| 英文词条可参与造句 | 如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |'
 Add-Line ''
 
 # ---- 维护方式 ----

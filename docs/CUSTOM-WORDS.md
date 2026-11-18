@@ -2,11 +2,11 @@
 
 > 本文件由 `src/build-support/gen-word-table.ps1` 从实际词条文件生成，**请勿手工编辑**。
 >
-> 生成时间：2026-11-10 09:13
+> 生成时间：2026-11-18 19:13
 
 ## 概览
 
-> 2026-11-10 起英文白名单停用造句（`rime_ice.dict.yaml` 未导入 `mixed_tokens`）；下表「参与造句 ✅」只表示词条具备该能力，恢复导入后才实际生效。
+> 英文白名单参与造句：`mixed_tokens` 由 `custom_phrase.txt` 生成，只有下表里的白名单词会进入句子，`cn_en` 与任意英文单词不会。
 
 | 类别 | 数量 | 输入方式 | 参与造句 |
 |---|---:|---|---|
@@ -173,7 +173,7 @@ pwsh -File .\src\build-support\gen-numeric-dict.ps1 -Max 999999
 | 含数字的词编码去数字 | `STM32CubeMX` → `stmcubemx`；数字编码本身要用小键盘 |
 | 主键盘数字只选词 | 1–9（0 = 第 10 个）永远是选词，不会进入编码 |
 | 小键盘数字才输入数字 | `KP_0`–`KP_9` 参与拼写与造句 |
-| 英文词条可参与造句 | 需先恢复 `mixed_tokens` 导入；停用前如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |
+| 英文词条可参与造句 | 如 `arduinoqishiyejiunayang` → 「Arduino其实也就那样」 |
 
 ## 如何增删词条
 

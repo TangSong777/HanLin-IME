@@ -105,28 +105,28 @@ woshi        →  选「我是」
 
 `-` 与 `_` 在输入串里是**字面量**，不转中文标点，也不参与组词——Rime 的 speller 只认声母+韵母组成的音节，符号成不了音节，会被当分隔符（候选按 `-` 前后分段）。没有候选框时仍遵循中文标点规则。
 
-### 混合造句（已停用）
+### 混合造句
 
-> **2026-11-10 起停用英文混排。** 平时习惯直接打英文，拼音与英文混排用得少，
-> 所以英文白名单不再作为词典词条参与造句；数字混排保留。
-> 重新启用：取消 `rime_ice.dict.yaml` 里 `- mixed_tokens` 的注释，重新部署即可。
-
-停用前，输入串中可以同时出现拼音、数字与型号，由 Rime 的语言模型直接组成一句：
+输入串中可以同时出现拼音、数字与**白名单英文词**，由 Rime 的语言模型直接组成一句：
 
 ```
-esp32bistm32haoyong                  →  ESP32比STM32好用      （现已不出）
-youyijianshiqingshishuo32meiyou26da  →  有一件事情是说32没有26大
-arduinoqishiyejiunayang              →  Arduino其实也就那样    （现已不出）
+wozhendehenxihuanshiyongcodexzhezhonggongju  →  我真的很喜欢使用Codex这种工具
+esp32bistm32haoyong                          →  ESP32比STM32好用
+youyijianshiqingshishuo32meiyou26da          →  有一件事情是说32没有26大
+arduinoqishiyejiunayang                      →  Arduino其实也就那样
 ```
 
-> 上面三个例子里的数字都来自**小键盘**。真实打字时主键盘数字会被当作选词键，
+> 上面例子里的数字都来自**小键盘**。真实打字时主键盘数字会被当作选词键，
 > 只有小键盘数字才会进入输入串。
 
 | 组成 | 状态 | 作用 |
 |---|---|---|
-| `speller/alphabet` 含 `0-9` | 保留 | 数字可作为拼写字符进入输入串 |
-| `numeric.dict.yaml`（0–99999） | 保留 | 任意数字都能作为音节参与造句 |
-| `mixed_tokens.dict.yaml` | **停用** | 白名单词与 ESP32 / STM32 参与造句（取消注释即可恢复） |
+| `speller/alphabet` 含 `0-9` | 启用 | 数字可作为拼写字符进入输入串 |
+| `numeric.dict.yaml`（0–99999） | 启用 | 任意数字都能作为音节参与造句 |
+| `mixed_tokens.dict.yaml` | 启用 | **仅** `custom_phrase.txt` 里的白名单词与 ESP32 / STM32 参与造句 |
+
+英文混排**只认白名单**：`mixed_tokens` 由 `custom_phrase.txt` 生成，词条数就是白名单词条数，
+不会把 `cn_en` 的 1000 多条中英混排词或任意英文单词带进句子。
 
 数字的来源按按键区分：**小键盘数字参与拼写，主键盘数字只用于选词**。
 

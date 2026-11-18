@@ -1,6 +1,6 @@
 ﻿#define MyAppName "寒淋输入法"
-#define MyAppVersion "0.2.0"
-#define MyAppVersionQuad "0.2.0.0"
+#define MyAppVersion "0.2.1"
+#define MyAppVersionQuad "0.2.1.0"
 #define MyAppPublisher "TangSong777"
 #define MyAppURL "https://github.com/TangSong777/HanLin-IME"
 
