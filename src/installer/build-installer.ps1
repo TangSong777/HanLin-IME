@@ -112,9 +112,14 @@ Copy-PayloadFile (Join-Path $src 'LICENSE.txt') (Join-Path $payload 'licenses\We
 Copy-PayloadFile (Join-Path $repo 'reference\librime-reference\LICENSE') (Join-Path $payload 'licenses\librime.txt')
 Copy-PayloadFile (Join-Path $RimeSourceDir 'LICENSE') (Join-Path $payload 'licenses\rime-ice.txt')
 
-$deploy = Start-Process -FilePath (Join-Path $payload 'HanLinHost.exe') -ArgumentList @('--deploy','--user-data',('"{0}"' -f $compiledProfile)) -WorkingDirectory $payload -WindowStyle Hidden -PassThru -Wait
-if ($deploy.ExitCode -eq 3) { throw '打包需要临时使用寒淋部署程序。请先退出正在运行的寒淋后端。' }
-if ($deploy.ExitCode -ne 0) { throw "安装包词库编译失败，退出码 $($deploy.ExitCode)。" }
+# HanLinHost 是 GUI 程序（wWinMain），Start-Process -Wait 拿不到可靠退出码，改用 start /wait。
+$deployExe = Join-Path $payload 'HanLinHost.exe'
+$deployCmd = 'start /wait "" "{0}" --deploy --user-data "{1}"' -f $deployExe, $compiledProfile
+Push-Location $payload
+try { cmd.exe /d /c $deployCmd } finally { Pop-Location }
+$deployExit = $LASTEXITCODE
+if ($deployExit -eq 3) { throw '打包需要临时使用寒淋部署程序。请先退出正在运行的寒淋后端。' }
+if ($deployExit -ne 0) { throw "安装包词库编译失败，退出码 $deployExit。" }
 Copy-Item -LiteralPath (Join-Path $compiledProfile 'build') -Destination (Join-Path $data 'build') -Recurse
 
 foreach ($name in 'default.yaml','rime_ice.schema.yaml','rime_ice.table.bin','rime_ice.prism.bin','weasel.yaml') {
