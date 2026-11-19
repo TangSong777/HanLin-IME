@@ -2,13 +2,11 @@
 
 寒淋输入法使用自研 Windows TSF 文本服务，以 librime 1.17.0 为引擎，默认启用雾凇拼音。支持数字和符号混合造句、拼音纠错与逐字学词，候选窗沿用项目的 SSF 渲染层。
 
-> 当前工作区包含寒淋的本地测试版。记事本、Edge、VS Code 和便笺的前台验收仍待完成。
-
 | | |
 |---|---|
-| 版本 | `0.2.2` |
+| 版本 | `0.2.3` |
 | 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
-| 本地测试包 | `HanLin-Setup-0.2.2.exe`，适用于 x64 Windows |
+| 安装包 | `HanLin-Setup-0.2.3.exe`，适用于 x64 Windows |
 | 许可证 | GPL-3.0（代码）· 皮肤素材版权归原作者 |
 
 ## 目录
@@ -40,7 +38,7 @@
 
 ## 快速开始
 
-1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-0.2.2.exe`。
+1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-0.2.3.exe`。
 2. 在 Windows 输入法列表选择「寒淋输入法」。
 3. 打一段拼音验证候选。
 
@@ -210,7 +208,7 @@ cC 1 0 0 / 4      →  100/4=25.0
 静默安装（需在已提权终端中运行）：
 
 ```powershell
-HanLin-Setup-0.2.2.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
+HanLin-Setup-0.2.3.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 ```
 
 ### 安装布局
