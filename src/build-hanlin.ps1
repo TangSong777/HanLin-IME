@@ -3,7 +3,8 @@ param(
     [string]$RendererLibrary = (Join-Path $PSScriptRoot 'msbuild\Release\x64\WeaselUI.lib'),
     [string]$EngineDll = (Join-Path $PSScriptRoot 'dist\rime.dll'),
     [string]$OutputRoot = (Join-Path $PSScriptRoot 'output'),
-    [string]$SharedDataDir
+    [string]$SharedDataDir,
+    [switch]$BuildRegression
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,7 +35,8 @@ try {
         $options = if ($architecture -eq 'x64') {
             ('-DHANLIN_BUILD_HOST=ON -DBOOST_ROOT="{0}" -DHANLIN_RENDERER_LIBRARY="{1}"' -f $boost, $renderer)
         } else { '-DHANLIN_BUILD_HOST=OFF' }
-        $command = 'call "{0}" >nul && "{1}" -S "{2}" -B "{3}" -GNinja -DCMAKE_BUILD_TYPE=Release {4} && "{1}" --build "{3}"' -f $vcvars, $cmake, $source, $build, $options
+        $regression = if ($BuildRegression) { 'ON' } else { 'OFF' }
+        $command = 'call "{0}" >nul && "{1}" -S "{2}" -B "{3}" -GNinja -DCMAKE_BUILD_TYPE=Release -DHANLIN_BUILD_REGRESSION={4} {5} && "{1}" --build "{3}"' -f $vcvars, $cmake, $source, $build, $regression, $options
         & cmd.exe /d /c $command
         if ($LASTEXITCODE -ne 0) { throw "HanLin $architecture build failed ($LASTEXITCODE)" }
     }

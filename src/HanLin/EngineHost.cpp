@@ -20,6 +20,7 @@ constexpr wchar_t kHostWindowClass[] = L"HanLinEngineHost";
 constexpr UINT kPresent = WM_APP + 1;
 constexpr char kSchema[] = "rime_ice";
 constexpr wchar_t kDataRevision[] = L"hanlin-data.revision";
+constexpr ULONGLONG kSessionIdleTime = 5 * 60 * 1000;
 
 namespace fs = std::filesystem;
 
@@ -147,7 +148,8 @@ struct Session {
   RimeSessionId rime;
   DWORD process;
   HWND notify_window;
-  bool show_popup;
+  ULONGLONG last_activity;
+  uint32_t menu_revision = 0;
 };
 
 class EngineHost {
@@ -213,12 +215,17 @@ class EngineHost {
     ReadStyle(personal);
     ui_.InServer() = true;
     ui_.SetUICallBack([this](size_t* select, size_t* highlight, bool* backward, bool* scroll) {
+      if (!rendered_menu_revision_) return;
       const auto session = sessions_.find(active_);
       if (session == sessions_.end() || !session->second.notify_window) return;
       const auto window = session->second.notify_window;
-      if (select) PostMessageW(window, kCandidateAction, static_cast<WPARAM>(Command::Select), *select);
-      else if (highlight) PostMessageW(window, kCandidateAction, static_cast<WPARAM>(Command::Highlight), *highlight);
-      else if (backward || scroll) PostMessageW(window, kCandidateAction, static_cast<WPARAM>(Command::Page), backward ? *backward : *scroll);
+      const auto post = [&](Command command, size_t value) {
+        PostMessageW(window, kCandidateAction, rendered_menu_revision_,
+                     MAKELPARAM(static_cast<WORD>(command), static_cast<WORD>(value)));
+      };
+      if (select) post(Command::Select, *select);
+      else if (highlight) post(Command::Highlight, *highlight);
+      else if (backward || scroll) post(Command::Page, backward ? *backward : *scroll);
     });
   }
 
@@ -227,23 +234,32 @@ class EngineHost {
     const auto it = sessions_.find(request.session);
     if (it == sessions_.end() || it->second.process != process) return {};
     auto& session = it->second;
+    session.last_activity = GetTickCount64();
+    const bool menu_action = request.command == Command::Select || request.command == Command::Highlight ||
+        request.command == Command::Page || (request.command == Command::Clear && request.args[1]);
+    if (menu_action && (active_ != request.session || !session.menu_revision ||
+                        session.menu_revision != static_cast<uint32_t>(request.args[1]))) {
+      State ignored;
+      ignored.session = request.session;
+      ignored.has_caret = active_ == request.session && has_caret_;
+      return ignored;
+    }
     const auto id = session.rime;
     bool handled = true;
     switch (request.command) {
       case Command::Close:
-        if (active_ == request.session) Blur();
-        api_->destroy_session(id);
-        sessions_.erase(it);
+        RemoveSession(it);
         return {};
       case Command::Blur:
         if (active_ == request.session) Blur();
+        session.menu_revision = 0;
         return Snapshot(request.session, handled);
       case Command::Focus:
         SetActive(request.session);
         if (global_ascii_) api_->set_option(id, "ascii_mode", ascii_);
         break;
       case Command::Place:
-        return Place(request, session);
+        return Place(request);
       case Command::Clear:
         api_->clear_composition(id);
         break;
@@ -280,6 +296,13 @@ class EngineHost {
         return {};
     }
     auto state = Snapshot(request.session, handled);
+    if (state.candidates.empty()) {
+      session.menu_revision = 0;
+    } else if (!session.menu_revision || request.command != Command::Highlight) {
+      if (!++next_menu_revision_) ++next_menu_revision_;
+      session.menu_revision = next_menu_revision_;
+    }
+    state.menu_revision = session.menu_revision;
     if (active_ == request.session) {
       frame_ = state;
       frame_.commit.clear();
@@ -291,20 +314,19 @@ class EngineHost {
 
   void PresentPending() {
     present_scheduled_ = false;
-    const auto session = sessions_.find(active_);
-    if (session != sessions_.end() && active_ == frame_.session)
-      Present(session->second, frame_);
+    if (active_ && active_ == frame_.session) Present(frame_);
   }
 
  private:
+  using Sessions = std::map<uint64_t, Session>;
+
+  Sessions::iterator RemoveSession(Sessions::iterator it) {
+    if (it->first == active_) Blur();
+    api_->destroy_session(it->second.rime);
+    return sessions_.erase(it);
+  }
+
   State Open(const Request& request, DWORD process) {
-    for (auto it = sessions_.begin(); it != sessions_.end();) {
-      if (!it->second.notify_window || IsWindow(it->second.notify_window)) { ++it; continue; }
-      if (it->first == active_) Blur();
-      api_->destroy_session(it->second.rime);
-      it = sessions_.erase(it);
-    }
-    if (sessions_.size() >= 512) return {};
     const auto native_window = static_cast<uint64_t>(static_cast<uint32_t>(request.args[0])) |
         (static_cast<uint64_t>(static_cast<uint32_t>(request.args[1])) << 32);
     const auto notify = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_window));
@@ -314,6 +336,18 @@ class EngineHost {
       if (!GetWindowThreadProcessId(notify, &owner) || owner != process ||
           !GetClassNameW(notify, name, 64) || std::wstring_view(name) != kClientWindowClass) return {};
     }
+    const auto now = GetTickCount64();
+    for (auto it = sessions_.begin(); it != sessions_.end();) {
+      const auto& session = it->second;
+      DWORD owner = 0;
+      if (session.notify_window) GetWindowThreadProcessId(session.notify_window, &owner);
+      const bool abandoned = session.notify_window && owner != session.process;
+      const bool replaced = notify && session.notify_window == notify && session.process == process;
+      const bool idle = it->first != active_ && now - session.last_activity >= kSessionIdleTime;
+      if (abandoned || replaced || idle) it = RemoveSession(it);
+      else ++it;
+    }
+    if (sessions_.size() >= 512) return {};
     uint64_t token = 0;
     if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&token), sizeof(token), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0 ||
         !token || sessions_.count(token)) return {};
@@ -328,7 +362,8 @@ class EngineHost {
     }
     api_->set_option(id, "ascii_mode", global_ascii_ && ascii_);
     api_->set_option(id, "_inline_preedit", ui_.style().inline_preedit);
-    sessions_.emplace(token, Session{id, process, notify, true});
+    sessions_.emplace(token, Session{id, process, notify, now});
+    if (!next_menu_revision_) next_menu_revision_ = static_cast<uint32_t>(token);
     return Snapshot(token, true);
   }
 
@@ -410,6 +445,7 @@ class EngineHost {
   void Blur() {
     active_ = 0;
     has_caret_ = false;
+    rendered_menu_revision_ = 0;
     frame_ = {};
     ui_.Hide();
   }
@@ -425,24 +461,25 @@ class EngineHost {
       present_scheduled_ = PostMessageW(window_, kPresent, 0, 0) != FALSE;
   }
 
-  State Place(const Request& request, Session& session) {
+  State Place(const Request& request) {
     if (active_ != request.session) return {};
     const RECT caret{request.args[0], request.args[1], request.args[2], request.args[3]};
-    const bool show_popup = request.args[4] != 0;
-    const bool changed = !has_caret_ || !EqualRect(&caret_, &caret) || session.show_popup != show_popup;
+    const bool show_popup = request.args[4] != 0 && caret.bottom > caret.top;
+    const bool changed = has_caret_ != show_popup || !EqualRect(&caret_, &caret);
     caret_ = caret;
-    has_caret_ = true;
-    session.show_popup = show_popup;
+    has_caret_ = show_popup;
+    if (!show_popup) rendered_menu_revision_ = 0;
     if (changed || (show_popup && frame_.composing && !ui_.panel_hwnd())) SchedulePresent();
     State acknowledgement;
     acknowledgement.session = request.session;
     acknowledgement.handled = true;
-    acknowledgement.has_caret = true;
+    acknowledgement.has_caret = has_caret_;
     return acknowledgement;
   }
 
-  void Present(const Session& session, const State& state) {
-    if (!state.composing || !session.show_popup || !has_caret_) {
+  void Present(const State& state) {
+    if (!state.composing || !has_caret_) {
+      rendered_menu_revision_ = 0;
       ui_.Hide();
       return;
     }
@@ -467,6 +504,7 @@ class EngineHost {
     }
     ui_.UpdateInputPosition(caret_);
     ui_.Show();
+    rendered_menu_revision_ = state.menu_revision;
   }
 
   void ReadStyle(const std::wstring& personal) {
@@ -530,9 +568,11 @@ class EngineHost {
   bool initialized_ = false;
   HWND window_ = nullptr;
   weasel::UI ui_;
-  std::map<uint64_t, Session> sessions_;
+  Sessions sessions_;
   State frame_;
   uint64_t active_ = 0;
+  uint32_t next_menu_revision_ = 0;
+  uint32_t rendered_menu_revision_ = 0;
   RECT caret_{};
   bool has_caret_ = false;
   bool frame_changed_ = false;

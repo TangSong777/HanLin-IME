@@ -29,6 +29,7 @@ function Get-HanLinSourceFingerprint([string]$SourceRoot) {
         Join-Path $SourceRoot 'build-hanlin.ps1'
         Join-Path $SourceRoot 'build-support\Find-Toolchain.ps1'
         Join-Path $SourceRoot 'build-support\HanLinBuild.ps1'
+        Join-Path $SourceRoot 'WeaselTSF\HostCompatibility.h'
         Join-Path $SourceRoot 'installer\HanLin.iss'
         Join-Path $repo 'reference\librime-reference\src\rime_api.h'
     )

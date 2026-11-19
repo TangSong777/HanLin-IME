@@ -24,7 +24,7 @@ enum class Command : uint32_t {
   Focus,
 };
 
-constexpr uint32_t kProtocolVersion = 1;
+constexpr uint32_t kProtocolVersion = 2;
 constexpr uint32_t kMaxCandidates = 64;
 constexpr UINT kCandidateAction = WM_APP + 24;
 constexpr wchar_t kClientWindowClass[] = L"HanLinTipEvents";
@@ -53,6 +53,7 @@ struct State {
   uint32_t caret = 0;
   uint32_t page = 0;
   uint32_t selection = 0;
+  uint32_t menu_revision = 0;
   std::wstring preedit;
   std::wstring commit;
   std::vector<Candidate> candidates;

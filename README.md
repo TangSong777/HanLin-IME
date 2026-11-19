@@ -498,6 +498,8 @@ pwsh -File .\src\installer\build-installer.ps1 -SharedDataDir <Rime共享数据�
 
 ### 测试
 
+构建时加 `-BuildRegression` 可以在 x64 和 x86 输出目录生成 `HanLinFrontendRegression.exe`。用同批构建的 `HanLinHost.exe` 启动隔离后端，`--shared-data` 指向安装包的 `data` 目录，`--user-data` 指向新建的临时目录。执行探针时传入同架构的 `HanLinTip.dll`。它会用合成文本测试写锁失败、只读输入框、候选操作和重连。
+
 全部测试可独立运行，无需管理员权限：
 
 ```powershell

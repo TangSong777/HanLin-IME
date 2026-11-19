@@ -32,7 +32,8 @@ std::wstring Endpoint(const std::wstring& sid) {
   DWORD session = 0;
   if (sid.empty() || !ProcessIdToSessionId(GetCurrentProcessId(), &session))
     return {};
-  return L"\\\\.\\pipe\\HanLinIme.1." + std::to_wstring(session) + L"." + sid;
+  return L"\\\\.\\pipe\\HanLinIme." + std::to_wstring(kProtocolVersion) + L"." +
+      std::to_wstring(session) + L"." + sid;
 }
 
 struct ResponseHeader {
@@ -43,9 +44,11 @@ struct ResponseHeader {
   uint32_t page;
   uint32_t selection;
   uint32_t candidate_count;
+  uint32_t menu_revision;
+  uint32_t reserved;
 };
 
-static_assert(sizeof(Request) == 40 && sizeof(ResponseHeader) == 32);
+static_assert(sizeof(Request) == 40 && sizeof(ResponseHeader) == 40);
 static_assert(sizeof(wchar_t) == 2);
 
 enum StateFlag : uint32_t {
@@ -84,7 +87,8 @@ bool WriteState(const State& state, std::vector<uint8_t>& packet) {
   packet.clear();
   Append(packet, ResponseHeader{kProtocolVersion, flags, state.session, state.caret,
                                 state.page, state.selection,
-                                static_cast<uint32_t>(state.candidates.size())});
+                                static_cast<uint32_t>(state.candidates.size()),
+                                state.menu_revision, 0});
   if (!AppendString(packet, state.preedit) || !AppendString(packet, state.commit))
     return false;
   for (const auto& candidate : state.candidates)
@@ -141,6 +145,7 @@ bool ReadState(const uint8_t* packet, size_t size, State& result) {
   state.caret = (std::min)(header.caret, static_cast<uint32_t>(state.preedit.size()));
   state.page = header.page;
   state.selection = header.selection;
+  state.menu_revision = header.menu_revision;
   state.candidates.resize(header.candidate_count);
   for (auto& candidate : state.candidates)
     if (!reader.Read(candidate.text) || !reader.Read(candidate.comment) ||

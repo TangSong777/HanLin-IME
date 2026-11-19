@@ -96,6 +96,7 @@ bool CandidateElement::Update(ITfContext* context, const State& state) {
   bool changed = document.Get() != document_.Get() || selected != selected_ || count != items_.size();
   document_ = std::move(document);
   selected_ = selected;
+  menu_revision_ = state.menu_revision;
   items_.resize(count);
   for (size_t i = 0; i < count; ++i) {
     const auto& text = state.candidates[i].text;
@@ -166,15 +167,15 @@ HRESULT CandidateElement::GetCurrentPage(UINT* out) {
 }
 HRESULT CandidateElement::SetSelection(UINT index) {
   if (index >= items_.size()) return E_INVALIDARG;
-  if (action_) action_(Command::Highlight, index);
+  if (action_) action_(Command::Highlight, index, menu_revision_);
   return S_OK;
 }
 HRESULT CandidateElement::Finalize() {
-  if (action_ && !items_.empty()) action_(Command::Select, selected_);
+  if (action_ && !items_.empty()) action_(Command::Select, selected_, menu_revision_);
   return S_OK;
 }
 HRESULT CandidateElement::Abort() {
-  if (action_) action_(Command::Clear, 0);
+  if (action_) action_(Command::Clear, 0, menu_revision_);
   return S_OK;
 }
 

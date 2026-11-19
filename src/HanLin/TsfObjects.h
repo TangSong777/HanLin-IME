@@ -63,7 +63,7 @@ HRESULT InputAttribute(REFGUID id, ITfDisplayAttributeInfo** out);
 
 class CandidateElement final : public SingleInterface<ITfCandidateListUIElementBehavior> {
  public:
-  using Action = std::function<void(Command, int)>;
+  using Action = std::function<void(Command, int, uint32_t)>;
   explicit CandidateElement(Action action) : action_(std::move(action)) {}
   bool Update(ITfContext* context, const State& state);
   void Detach() { action_ = {}; document_.Reset(); }
@@ -92,6 +92,7 @@ class CandidateElement final : public SingleInterface<ITfCandidateListUIElementB
   ComPtr<ITfDocumentMgr> document_;
   std::vector<std::wstring> items_;
   UINT selected_ = 0;
+  uint32_t menu_revision_ = 0;
 };
 
 class ModeButton final : public ITfLangBarItemButton, public ITfSource {

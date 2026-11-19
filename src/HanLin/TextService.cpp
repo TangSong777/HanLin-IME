@@ -1,4 +1,5 @@
 #include "TsfObjects.h"
+#include "../WeaselTSF/HostCompatibility.h"
 
 #include <X11/keysym.h>
 
@@ -21,14 +22,6 @@ std::mutex notify_class;
 
 enum class CallResult { Success, SessionRejected, Unavailable };
 
-struct CompositionUpdate {
-  std::wstring preedit;
-  std::wstring commit;
-  uint32_t caret;
-  bool composing;
-  bool inline_preedit;
-};
-
 class Edit final : public SingleInterface<ITfEditSession> {
  public:
   explicit Edit(std::function<HRESULT(TfEditCookie)> action) : action_(std::move(action)) {}
@@ -38,15 +31,14 @@ class Edit final : public SingleInterface<ITfEditSession> {
   std::function<HRESULT(TfEditCookie)> action_;
 };
 
-HRESULT RequestEdit(ITfContext* context, TfClientId client, DWORD mode,
+HRESULT RequestEdit(ITfContext* context, TfClientId client, DWORD flags,
                     std::function<HRESULT(TfEditCookie)> action) {
   if (!context) return E_INVALIDARG;
   ComPtr<ITfEditSession> session;
   session.Attach(new (std::nothrow) Edit(std::move(action)));
   if (!session) return E_OUTOFMEMORY;
   HRESULT applied = E_FAIL;
-  const auto requested = context->RequestEditSession(client, session.Get(),
-      TF_ES_ASYNCDONTCARE | mode, &applied);
+  const auto requested = context->RequestEditSession(client, session.Get(), flags, &applied);
   return SUCCEEDED(requested) ? applied : requested;
 }
 
@@ -85,6 +77,8 @@ bool ReadInteger(ITfCompartment* compartment, LONG& value) {
 
 bool ContextDisabled(ITfContext* context) {
   if (!context) return true;
+  TF_STATUS status{};
+  if (FAILED(context->GetStatus(&status)) || (status.dwDynamicFlags & TF_SD_READONLY)) return true;
   for (auto* id : {&GUID_COMPARTMENT_KEYBOARD_DISABLED, &GUID_COMPARTMENT_EMPTYCONTEXT}) {
     LONG value = 0;
     const auto compartment = GetCompartment(context, *id);
@@ -325,7 +319,7 @@ class TextService final : public ITfTextInputProcessorEx,
     if (composition == composition_.Get()) {
       composition_.Reset();
       Send(Command::Clear);
-      EndElements();
+      ResetInput();
     }
     return S_OK;
   }
@@ -339,8 +333,12 @@ class TextService final : public ITfTextInputProcessorEx,
 
   HRESULT STDMETHODCALLTYPE OnEndEdit(ITfContext* context, TfEditCookie cookie, ITfEditRecord* changes) override {
     BOOL changed = FALSE;
-    if (!composition_ || context != context_.Get() || !changes ||
+    if (context != context_.Get() || !changes ||
         FAILED(changes->GetSelectionStatus(&changed)) || !changed) return S_OK;
+    if (!composition_) {
+      pending_commit_.clear();
+      return S_OK;
+    }
     TF_SELECTION selected{};
     ULONG fetched = 0;
     if (FAILED(context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selected, &fetched)) || !fetched) return S_OK;
@@ -354,17 +352,16 @@ class TextService final : public ITfTextInputProcessorEx,
         SUCCEEDED(selection->CompareEnd(cookie, range.Get(), TF_ANCHOR_END, &right)) &&
         (left < 0 || right > 0)) {
       Send(Command::Clear);
-      CancelComposition();
-      EndElements();
+      ResetInput();
     }
     return S_OK;
   }
 
   HRESULT STDMETHODCALLTYPE OnLayoutChange(ITfContext* context, TfLayoutCode code, ITfContextView*) override {
     if (!composition_ || context != context_.Get()) return S_OK;
-    if (code == TF_LC_DESTROY) Send(Command::Blur);
-    else if (code == TF_LC_CHANGE)
-      RequestEdit(context, client_, TF_ES_READ, [this, keep = ComPtr<ITfTextInputProcessorEx>(this),
+    if (code == TF_LC_DESTROY) SendPlacement({});
+    else if (code == TF_LC_CHANGE || code == TF_LC_CREATE)
+      RequestEdit(context, client_, TF_ES_ASYNCDONTCARE | TF_ES_READ, [this, keep = ComPtr<ITfTextInputProcessorEx>(this),
                    current = ComPtr<ITfContext>(context)](TfEditCookie cookie) {
         if (current.Get() == context_.Get()) Place(current.Get(), cookie);
         return S_OK;
@@ -403,35 +400,58 @@ class TextService final : public ITfTextInputProcessorEx,
     const auto key = Translate(word, data, release);
     if (!key.symbol || (key.modifiers & kSuper)) return S_OK;
     if (context != context_.Get()) AttachContext(context);
-    State state;
-    if (!SendInput(Command::Key, {key.symbol, key.modifiers}, state)) return S_OK;
-    *eaten = state.handled;
-    Accept(context, std::move(state));
+    if (!EnsureSession() && pending_commit_.empty()) return S_OK;
+    // Only consume the key if TSF grants a synchronous write session.
+    RequestEdit(context, client_, TF_ES_SYNC | TF_ES_READWRITE,
+        [this, context, key, eaten, generation = generation_](TfEditCookie cookie) {
+          if (context != context_.Get() || generation != generation_) return S_OK;
+          const auto written = FlushCommit(context, cookie);
+          if (FAILED(written)) return written;
+          State state;
+          if (!SendInput(Command::Key, {key.symbol, key.modifiers}, state, cookie)) return S_OK;
+          return Accept(context, cookie, std::move(state), eaten);
+        });
     return S_OK;
   }
 
-  void Accept(ITfContext* context, State state) {
+  HRESULT Accept(ITfContext* context, TfEditCookie cookie, State state, BOOL* eaten = nullptr) {
+    if (eaten) *eaten = state.handled;
+    const bool committed = !state.commit.empty();
+    if (committed) {
+      pending_commit_ = std::move(state.commit);
+      const auto written = FlushCommit(context, cookie);
+      if (FAILED(written)) {
+        EndElements();
+        SendPlacement({});
+        return written;
+      }
+    }
+
+    const auto applied = ApplyComposition(context, cookie, state);
+    if (FAILED(applied)) {
+      if (eaten && !committed) *eaten = FALSE;
+      Send(Command::Clear);
+      ResetInput(cookie);
+      return applied;
+    }
+    composing_ = state.composing;
     UpdateMode(state.ascii);
     UpdateElements(context, state);
-    const bool edit = state.composing || composing_ || !state.commit.empty();
-    composing_ = state.composing;
-    if (!edit) return;
-    CompositionUpdate update{std::move(state.preedit), std::move(state.commit),
-                             state.caret, state.composing, state.inline_preedit};
-    RequestEdit(context, client_, TF_ES_READWRITE,
-        [this, keep = ComPtr<ITfTextInputProcessorEx>(this), current = ComPtr<ITfContext>(context),
-         generation = generation_, update = std::move(update)](TfEditCookie cookie) {
-          if (generation == generation_ && current.Get() == context_.Get())
-            return Apply(current.Get(), cookie, update);
-          return update.commit.empty() ? S_OK : Insert(current.Get(), cookie, update.commit);
-        });
+    if (composition_ && context == context_.Get()) Place(context, cookie);
+    return S_OK;
   }
 
-  HRESULT Apply(ITfContext* context, TfEditCookie cookie, const CompositionUpdate& state) {
-    if (!state.commit.empty()) {
-      const auto applied = composition_ ? EndComposition(context, cookie, state.commit) : Insert(context, cookie, state.commit);
-      if (FAILED(applied)) return applied;
-    }
+  HRESULT FlushCommit(ITfContext* context, TfEditCookie cookie) {
+    if (pending_commit_.empty()) return S_OK;
+    auto text = std::move(pending_commit_);
+    pending_commit_.clear();
+    const auto generation = generation_;
+    const auto written = composition_ ? EndComposition(context, cookie, text) : Insert(context, cookie, text);
+    if (FAILED(written) && generation == generation_) pending_commit_ = std::move(text);
+    return written;
+  }
+
+  HRESULT ApplyComposition(ITfContext* context, TfEditCookie cookie, const State& state) {
     if (!state.composing) return composition_ ? EndComposition(context, cookie, L"") : S_OK;
     if (!composition_) {
       const auto result = BeginComposition(context, cookie);
@@ -455,7 +475,6 @@ class TextService final : public ITfTextInputProcessorEx,
       }
     }
     MoveSelection(context, range.Get(), cookie, inline_text ? static_cast<LONG>(state.caret) : 0, false);
-    Place(context, cookie);
     return S_OK;
   }
 
@@ -471,45 +490,93 @@ class TextService final : public ITfTextInputProcessorEx,
   }
 
   HRESULT EndComposition(ITfContext* context, TfEditCookie cookie, const std::wstring& text) {
-    auto composition = std::move(composition_);
+    auto composition = composition_;
     ComPtr<ITfRange> range;
-    auto result = composition->GetRange(&range);
-    if (SUCCEEDED(result)) {
-      ComPtr<ITfProperty> attr;
-      if (SUCCEEDED(context->GetProperty(GUID_PROP_ATTRIBUTE, &attr))) attr->Clear(cookie, range.Get());
-      result = range->SetText(cookie, 0, text.c_str(), static_cast<LONG>(text.size()));
-      if (SUCCEEDED(result)) MoveSelection(context, range.Get(), cookie, 0, true);
-    }
-    const auto ended = composition->EndComposition(cookie);
-    return SUCCEEDED(result) ? ended : result;
+    auto written = composition->GetRange(&range);
+    if (SUCCEEDED(written)) written = range->SetText(cookie, 0, text.c_str(), static_cast<LONG>(text.size()));
+    if (FAILED(written)) return written;
+
+    composition_.Reset();
+    ComPtr<ITfProperty> attr;
+    if (SUCCEEDED(context->GetProperty(GUID_PROP_ATTRIBUTE, &attr))) attr->Clear(cookie, range.Get());
+    MoveSelection(context, range.Get(), cookie, 0, true);
+    // At this point the text is already submitted, even if ending the composition fails.
+    composition->EndComposition(cookie);
+    return S_OK;
   }
 
-  void CancelComposition() {
+  void CancelComposition(std::optional<TfEditCookie> cookie) {
     if (!composition_ || !context_) return;
-    auto composition = std::move(composition_);
-    RequestEdit(context_.Get(), client_, TF_ES_READWRITE,
-        [composition = std::move(composition)](TfEditCookie cookie) {
-          ComPtr<ITfRange> range;
-          if (SUCCEEDED(composition->GetRange(&range))) range->SetText(cookie, 0, L"", 0);
-          return composition->EndComposition(cookie);
-        });
+    auto cancel = [composition = std::move(composition_)](TfEditCookie edit) {
+      ComPtr<ITfRange> range;
+      if (SUCCEEDED(composition->GetRange(&range))) range->SetText(edit, 0, L"", 0);
+      return composition->EndComposition(edit);
+    };
+    if (cookie) cancel(*cookie);
+    else RequestEdit(context_.Get(), client_, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, std::move(cancel));
   }
 
   void Place(ITfContext* context, TfEditCookie cookie) {
-    if (!composition_) return;
+    if (!composition_ || !show_popup_ || (flags_ & TF_TMF_UIELEMENTENABLEDONLY)) {
+      SendPlacement({});
+      return;
+    }
     ComPtr<ITfContextView> view;
-    if (FAILED(context->GetActiveView(&view)) || !view) return;
+    if (FAILED(context->GetActiveView(&view)) || !view) {
+      SendPlacement({});
+      return;
+    }
+    HWND view_window = nullptr;
+    view->GetWnd(&view_window);
+    const auto root = view_window ? GetAncestor(view_window, GA_ROOT) : nullptr;
+    if (root && IsIconic(root)) {
+      SendPlacement({});
+      return;
+    }
+    RECT view_bounds{};
+    if (FAILED(view->GetScreenExt(&view_bounds)) || IsRectEmpty(&view_bounds)) {
+      view_bounds = {};
+      if (root) GetWindowRect(root, &view_bounds);
+    }
+
     TF_SELECTION selected{};
     ULONG fetched = 0;
-    if (FAILED(context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selected, &fetched)) || !fetched) return;
-    ComPtr<ITfRange> caret;
-    caret.Attach(selected.range);
     RECT bounds{};
-    BOOL clipped = FALSE;
-    if (FAILED(view->GetTextExt(cookie, caret.Get(), &bounds, &clipped)) ||
-        (bounds.left == bounds.right && bounds.top == bounds.bottom)) return;
-    const bool show = show_popup_ && !(flags_ & TF_TMF_UIELEMENTENABLEDONLY);
-    const std::array<int32_t, 6> placement{bounds.left, bounds.top, bounds.right, bounds.bottom, show ? 1 : 0};
+    if (SUCCEEDED(context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selected, &fetched)) && fetched) {
+      ComPtr<ITfRange> caret;
+      caret.Attach(selected.range);
+      BOOL clipped = FALSE;
+      if (SUCCEEDED(view->GetTextExt(cookie, caret.Get(), &bounds, &clipped)) && !clipped &&
+          weasel_host::RectTouchesMonitor(bounds) && !weasel_host::PlaceholderExtent(bounds, view_bounds)) {
+        SendPlacement(bounds);
+        return;
+      }
+    }
+
+    const auto foreground = GetForegroundWindow();
+    const bool owns_foreground = foreground && (root ? root == GetAncestor(foreground, GA_ROOT) :
+        GetWindowThreadProcessId(foreground, nullptr) == GetCurrentThreadId());
+    if (owns_foreground) {
+      if (weasel_host::GetForegroundCaretRect(foreground, 20, bounds) &&
+          !weasel_host::PlaceholderExtent(bounds, view_bounds)) {
+        SendPlacement(bounds);
+        return;
+      }
+      if (view_bounds.right - view_bounds.left > 200 && view_bounds.bottom - view_bounds.top > 100) {
+        const auto anchor = weasel_host::FallbackAnchor(view_bounds);
+        if (weasel_host::RectTouchesMonitor(anchor)) {
+          SendPlacement(anchor);
+          return;
+        }
+      }
+    }
+    SendPlacement({});
+  }
+
+  void SendPlacement(const std::optional<RECT>& bounds) {
+    if (!bounds && !last_placement_) return;
+    std::array<int32_t, 6> placement{};
+    if (bounds) placement = {bounds->left, bounds->top, bounds->right, bounds->bottom, 1};
     if (last_placement_ && *last_placement_ == placement) return;
     State state;
     if (Call(Command::Place, placement, state) == CallResult::Success) last_placement_ = placement;
@@ -518,7 +585,9 @@ class TextService final : public ITfTextInputProcessorEx,
   void UpdateElements(ITfContext* context, const State& state) {
     if (!ui_manager_ || state.candidates.empty()) { EndElements(); return; }
     if (!element_) {
-      element_.Attach(new (std::nothrow) CandidateElement([this](Command command, int value) { CandidateAction(command, value); }));
+      element_.Attach(new (std::nothrow) CandidateElement([this](Command command, int value, uint32_t revision) {
+        CandidateAction(command, value, revision);
+      }));
       if (!element_) return;
       element_->Update(context, state);
       BOOL popup = TRUE;
@@ -540,11 +609,19 @@ class TextService final : public ITfTextInputProcessorEx,
     show_popup_ = true;
   }
 
-  void CandidateAction(Command command, int value) {
-    if (!context_) return;
-    State state;
-    if (Call(command, {value}, state) == CallResult::Success) Accept(context_.Get(), std::move(state));
-    else ResetInput();
+  void CandidateAction(Command command, int value, uint32_t revision) {
+    if (!revision || !token_ || !pending_commit_.empty() || !TestContext(context_.Get())) return;
+    RequestEdit(context_.Get(), client_, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE,
+        [this, keep = ComPtr<ITfTextInputProcessorEx>(this), current = context_,
+         generation = generation_, token = token_, command, value, revision](TfEditCookie cookie) {
+          if (generation != generation_ || token != token_ || current.Get() != context_.Get()) return S_OK;
+          State state;
+          if (Call(command, {value, static_cast<int32_t>(revision)}, state) != CallResult::Success) {
+            ResetInput(cookie);
+            return S_OK;
+          }
+          return state.handled ? Accept(current.Get(), cookie, std::move(state)) : S_OK;
+        });
   }
 
   void FocusDocument(ITfDocumentMgr* document) {
@@ -581,11 +658,12 @@ class TextService final : public ITfTextInputProcessorEx,
     if (SendInput(Command::SetAscii, {ascii ? 1 : 0}, state)) UpdateMode(state.ascii);
   }
 
-  void ResetInput() {
+  void ResetInput(std::optional<TfEditCookie> cookie = {}) {
     ++generation_;
     composing_ = false;
+    pending_commit_.clear();
     last_placement_.reset();
-    CancelComposition();
+    CancelComposition(cookie);
     EndElements();
   }
 
@@ -642,11 +720,12 @@ class TextService final : public ITfTextInputProcessorEx,
     return replied && !state.session ? CallResult::SessionRejected : CallResult::Unavailable;
   }
 
-  bool SendInput(Command command, std::array<int32_t, 6> args, State& state) {
+  bool SendInput(Command command, std::array<int32_t, 6> args, State& state,
+                 std::optional<TfEditCookie> cookie = {}) {
     if (!EnsureSession()) return false;
     const auto result = Call(command, args, state);
     if (result == CallResult::Success) return true;
-    ResetInput();
+    ResetInput(cookie);
     // An empty session reply rejects the request before input is processed.
     // A failed round trip can mean that only the reply was lost.
     return result == CallResult::SessionRejected && EnsureSession() &&
@@ -664,9 +743,9 @@ class TextService final : public ITfTextInputProcessorEx,
       SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
     } else if (message == kCandidateAction) {
       const auto service = reinterpret_cast<TextService*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-      const auto command = static_cast<Command>(word);
+      const auto command = static_cast<Command>(LOWORD(param));
       if (service && (command == Command::Select || command == Command::Highlight || command == Command::Page))
-        service->CandidateAction(command, static_cast<int>(param));
+        service->CandidateAction(command, HIWORD(param), static_cast<uint32_t>(word));
       return 0;
     }
     return DefWindowProcW(window, message, word, param);
@@ -687,6 +766,7 @@ class TextService final : public ITfTextInputProcessorEx,
   ComLifetime lifetime_;
   Client transport_;
   std::optional<std::array<int32_t, 6>> last_placement_;
+  std::wstring pending_commit_;
   uint64_t token_ = 0;
   ULONGLONG retry_after_ = 0;
   HWND notify_ = nullptr;
