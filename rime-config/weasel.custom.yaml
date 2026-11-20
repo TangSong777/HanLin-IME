@@ -11,7 +11,7 @@ customization:
   rime_version: 1.13.1
 patch:
   global_ascii: true
-  show_notifications_time: 2000
+  show_notifications_time: 3000
   # --- Sogou SSF skin backend -------------------------------------------
   # Relative to the Rime user directory (D:\RimeUser), or an absolute path.
   # The directory must contain skin.ini plus the skin's PNG files.

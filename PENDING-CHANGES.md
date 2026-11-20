@@ -22,3 +22,19 @@
 4. 发布后清空本文件（保留标题与说明），并在 `CHANGELOG.md` 顶部记下对应版本
 
 ---
+
+### 2026-11-20 · 中英提示延长到 3 秒
+
+- **类型**：变更
+- **内容**：Shift 切换中英文时，光标旁的「中」/「英」提示从 2 秒延长到 3 秒。
+- **文件**：`src/HanLin/EngineHost.cpp`（`ShowWithTimeout(3000)`）、`src/WeaselUI/WeaselUI.cpp`（钳制上限 3000）、`README.md`、`docs/comparison-with-weasel-and-sogou.md`
+- **验证**：重新构建前端并替换 DLL，Shift 切换观察提示停留时间。
+- **影响**：需要替换 `HanLinTip.dll`（x64/x86）与 `weasel.dll`（x64/x86，Weasel 后端路径）并重启输入法进程。
+
+### 2026-11-20 · README 移除小狼毫兼容内容
+
+- **类型**：文档
+- **内容**：1.0.0 起寒淋作为独立软件，README 移除「小狼毫兼容配置」整节、产品定位对比、迁移章节中的小狼毫表述；致谢保留上游 GPL-3.0 归属。
+- **文件**：`README.md`
+- **验证**：`grep -c "小狼毫"` 从 12 降到 4（迁移章节 3 处 + 致谢 1 处）。
+- **影响**：仅文档。

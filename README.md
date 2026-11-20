@@ -16,7 +16,7 @@
 | 我想… | 看这里 |
 |---|---|
 | 装上并开始打字 | [快速开始](#快速开始) → [安装](#安装) |
-| 和原版小狼毫有什么区别 | [这个项目改了什么](#这个项目改了什么) |
+| 和原版输入法有什么区别 | [这个项目改了什么](#这个项目改了什么) |
 | 查某个按键干什么 | [使用 · 按键总表](#按键总表) |
 | 输入数字、型号、英文、符号 | [功能](#功能) |
 | 用计算器 | [功能 · 计算器](#计算器) |
@@ -60,19 +60,19 @@
 |---|---|
 | **本项目独有** | 自研 HanLinTip 文本服务与 HanLinHost 后台、搜狗 SSF 皮肤兼容层、小键盘原义输入与混合输入、英文白名单与分层补全、退格三档、候选窗生命周期修补、时间戳触发码禁用、词条管理工具 |
 | **高度定制** | librime 1.17.0（动态数字识别与学词补丁）、雾凇方案、构建与安装器 |
-| **复用** | Weasel 候选窗渲染代码、雾凇基础词库与 Lua 脚本、Color-P 皮肤素材 |
+| **复用** | 候选窗渲染代码、雾凇基础词库与 Lua 脚本、Color-P 皮肤素材 |
 
 ## 功能
 
 ### 皮肤原生渲染
 
-不做「照着配色调一调」，而是实现了一套搜狗 SSF 皮肤的解析与绘制层：直接读取 `skin.ini` 与原始 PNG，支持九宫格拉伸、逐像素 alpha 合成、皮肤自带字体与配色。状态栏关闭，中英提示以贴光标的皮肤图标呈现，2 秒后自动消失。
+不做「照着配色调一调」，而是实现了一套搜狗 SSF 皮肤的解析与绘制层：直接读取 `skin.ini` 与原始 PNG，支持九宫格拉伸、逐像素 alpha 合成、皮肤自带字体与配色。状态栏关闭，中英提示以贴光标的皮肤图标呈现，3 秒后自动消失。
 
-关掉 SSF 后端（`style/ssf_enabled: false`）即完整回落到 Weasel 原生渲染，不影响其他行为。
+关掉 SSF 后端（`style/ssf_enabled: false`）即完整回落到原生渲染，不影响其他行为。
 
 ### HanLin 前端
 
-寒淋使用自研的 Windows TSF 文本服务（`HanLinTip.dll`），不再依赖小狼毫的 `WeaselTSF.dll`。前端只负责与 Windows 输入框架对接，拼音、词库、候选生成全部交给 librime 1.17.0。
+寒淋使用自研的 Windows TSF 文本服务（`HanLinTip.dll`），不再依赖上游 TSF 实现。前端只负责与 Windows 输入框架对接，拼音、词库、候选生成全部交给 librime 1.17.0。
 
 | 组件 | 作用 |
 |---|---|
@@ -91,7 +91,7 @@
 |---|---|
 | 系统输入法切换入口 | 「淋」字主图标（珊瑚红三点水 + 黑色「林」） |
 | 任务栏语言栏 | 同上，小尺寸加粗描边 |
-| Shift 切换中英文 | 光标旁浮动「中」/「英」提示，2 秒后消失 |
+| Shift 切换中英文 | 光标旁浮动「中」/「英」提示，3 秒后消失 |
 | 词条工具 | 同一份字形的小图标 |
 
 图标源文件在 `src/HanLin/icons/`，改字形后重跑生成脚本即可。
@@ -207,7 +207,7 @@ cC 1 0 0 / 4      →  100/4=25.0
 |---|---|
 | 切走输入法时保留面板，切回只重建窗口 | 避免每次切回都重新解码皮肤与字体（实测 220 ms，换页后可达 0.5–2 s） |
 | 未取得光标锚点前不显示 | 避免窗口先在屏幕原点闪一下 |
-| 切回小狼毫必定是中文 | 避免残留英文状态 |
+| 切回英文输入法必定是中文 | 避免残留英文状态 |
 | 光标移开即终止会话 | 避免出现「Rime 仍在组合、TSF 已无组合」的中间态，也避免切回输入框时旧候选框复现 |
 
 ## 安装
@@ -231,21 +231,9 @@ HanLin-Setup-1.0.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 | Rime 用户目录 | `%APPDATA%\HanLin` |
 | 安装目录登记 | `HKLM\SOFTWARE\HanLin\InstallRoot`（x64 和 x86 注册表视图） |
 
-寒淋与旧的小狼毫输入法各自使用独立目录。小狼毫旧用户目录里的个人词库留在原位。寒淋用户目录可通过 `HKCU\Software\HanLin\UserDataDir` 指定，修改配置后可在后台退出时运行 `HanLinHost.exe --deploy`。
+寒淋使用独立目录，旧输入法的个人词库留在原位。寒淋用户目录可通过 `HKCU\Software\HanLin\UserDataDir` 指定，修改配置后可在后台退出时运行 `HanLinHost.exe --deploy`。
 
 卸载从 Windows「设置 → 应用」开始，注销寒淋文本服务并保留个人词库。
-
-### 小狼毫兼容配置
-
-已有小狼毫、只需更换皮肤与配置时：
-
-1. 复制 `assets/Color-P/` 到固定目录，例如 `C:\ProgramData\ColorPWeasel\Color-P`
-2. 复制 `rime-config/` 下的文件到 Rime 用户目录（托盘菜单「用户文件夹」）
-3. 复制 `rime-config/lua/keypad_input.lua` 到用户目录的 `lua\` 子目录
-4. 确认 `weasel.custom.yaml` 的 `style/ssf_skin` 指向第 1 步目录
-5. 托盘菜单 →「重新部署」
-
-> 词库数据（`cn_dicts/`、`en_dicts/`）与 `rime_ice.dict.yaml` 来自 rime-ice，随安装包分发，不在 `rime-config/` 内。手动部署时需要自行准备；若要大字表，需在 `import_tables` 中启用 `cn_dicts/41448`。
 
 ## 使用
 
@@ -477,7 +465,7 @@ rime-ice 默认把 `ts` 作为 Unix 时间戳触发码，而它同时是「唐�
 
 ### 构建
 
-使用 PowerShell 7、Visual Studio 2022、Windows SDK、Boost 1.82、CMake 和 Ninja。构建寒淋前端需要 x64 的 `WeaselUI.lib` 和寒淋定制的 librime 1.17.0 `rime.dll`。全新克隆请从同系列已安装的寒淋中取出定制 DLL，或用本项目引擎源码及 librime-lua 构建后通过 `-EngineDll` 提供。渲染库的编译依赖见 [构建小狼毫](docs/build-weasel.md)。
+使用 PowerShell 7、Visual Studio 2022、Windows SDK、Boost 1.82、CMake 和 Ninja。构建寒淋前端需要 x64 的 `WeaselUI.lib` 和寒淋定制的 librime 1.17.0 `rime.dll`。全新克隆请从同系列已安装的寒淋中取出定制 DLL，或用本项目引擎源码及 librime-lua 构建后通过 `-EngineDll` 提供。渲染库的编译依赖见 [构建渲染库](docs/build-weasel.md)。
 
 ```powershell
 git clone https://github.com/TangSong777/HanLin-IME.git
@@ -556,7 +544,7 @@ cmd /c .\src\build-support\build-dict-probe.cmd
 
 ## 项目结构
 
-仓库直接位于小狼毫安装目录下，源码在同级 `src/`：
+仓库位于安装目录下，源码在同级 `src/`：
 
 ```
 D:\Rime\                     # 仓库根
@@ -581,7 +569,7 @@ D:\Rime\                     # 仓库根
 ├── rime-config/             # 运行时配置与词条
 ├── docs/                    # 文档（CUSTOM-WORDS.md、ADD-WORDS.md 等）
 ├── reference/               # 第三方快照，仅作查阅
-├── weasel-0.17.4/           # 已安装的小狼毫本体（不入库）
+├── weasel-0.17.4/           # 已安装的上游本体（不入库）
 ├── CHANGELOG.md             # 版本判定与发布记录
 ├── PENDING-CHANGES.md       # 待发布改动账本
 └── README.md
@@ -723,8 +711,6 @@ git checkout snapshot
 - 输入引擎：[librime](https://github.com/rime/librime)（BSD-3-Clause）
 - 候选窗渲染代码：[Weasel 小狼毫](https://github.com/rime/weasel)（GPL-3.0）
 - 拼音方案：[rime-ice 雾凇拼音](https://github.com/iDvel/rime-ice)（MIT）
-- 皮肤原作：搜狗「竹子 Color-P」，作者**墨竹**；本仓库仅做小狼毫层面的移植
+- 皮肤原作：搜狗「竹子 Color-P」，作者**墨竹**；本仓库仅做皮肤移植
 
 本项目为个人定制作品，基于上述开源项目与皮肤资源二次开发，不是任何上游项目的官方版本，也未获得搜狗授权或背书。源代码遵循上游 Weasel 的 GPL-3.0；皮肤图片资源版权归原作者，仅作个人学习与自用移植。
-
-若需要官方支持、适合长期使用的小狼毫，请使用 [上游 Weasel](https://github.com/rime/weasel)。

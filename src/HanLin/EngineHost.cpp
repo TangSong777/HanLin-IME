@@ -501,7 +501,7 @@ class EngineHost {
       status.show_mode_tip = true;
       ui_.Update({}, status);
       ui_.UpdateInputPosition(caret_);
-      ui_.ShowWithTimeout(2000);
+      ui_.ShowWithTimeout(3000);
       mode_tip_pending_ = false;
       rendered_menu_revision_ = 0;
       return;

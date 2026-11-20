@@ -194,7 +194,7 @@ void UI::Hide() {
 }
 
 void UI::ShowWithTimeout(size_t millisec) {
-  if (status_.show_mode_tip && millisec > 2000) millisec = 2000;
+  if (status_.show_mode_tip && millisec > 3000) millisec = 3000;
   if (ssf::SuppressEmptyWindow(style_.ssf_enabled, ctx_.empty(),
                                status_.show_mode_tip)) {
     Hide();
