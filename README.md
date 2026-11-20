@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| 版本 | `0.2.3` |
+| 版本 | `1.0.0` |
 | 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
-| 安装包 | `HanLin-Setup-0.2.3.exe`，适用于 x64 Windows |
+| 安装包 | `HanLin-Setup-1.0.0.exe`，适用于 x64 Windows |
 | 许可证 | GPL-3.0（代码）· 皮肤素材版权归原作者 |
 
 ## 目录
@@ -21,6 +21,8 @@
 | 输入数字、型号、英文、符号 | [功能](#功能) |
 | 用计算器 | [功能 · 计算器](#计算器) |
 | 加自己的词 | [配置与词条](#配置与词条) → [扩展 · 词条](#词条) |
+| 用图形界面管理词条 | [功能 · 词条工具](#词条工具) |
+| 了解前端架构 / 图标 | [功能 · HanLin 前端](#hanlin-前端) · [图标系统](#图标系统) |
 | 换台机器 / 搬到别的输入法 | [迁移整套配置](#迁移整套配置) |
 | 调整候选排序（权重） | [权重分层](#权重分层) |
 | 排查「为什么不出候选」 | [已知限制](#已知限制) |
@@ -38,7 +40,7 @@
 
 ## 快速开始
 
-1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-0.2.3.exe`。
+1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-1.0.0.exe`。
 2. 在 Windows 输入法列表选择「寒淋输入法」。
 3. 打一段拼音验证候选。
 
@@ -56,8 +58,8 @@
 
 | 层次 | 内容 |
 |---|---|
-| **本项目独有** | 搜狗 SSF 皮肤兼容层、小键盘原义输入与混合输入、英文白名单与分层补全、退格三档、候选窗生命周期修补、时间戳触发码禁用 |
-| **高度定制** | HanLinTip 文本服务、librime 动态音节与学词、雾凇方案、构建与安装器 |
+| **本项目独有** | 自研 HanLinTip 文本服务与 HanLinHost 后台、搜狗 SSF 皮肤兼容层、小键盘原义输入与混合输入、英文白名单与分层补全、退格三档、候选窗生命周期修补、时间戳触发码禁用、词条管理工具 |
+| **高度定制** | librime 1.17.0（动态数字识别与学词补丁）、雾凇方案、构建与安装器 |
 | **复用** | Weasel 候选窗渲染代码、雾凇基础词库与 Lua 脚本、Color-P 皮肤素材 |
 
 ## 功能
@@ -67,6 +69,42 @@
 不做「照着配色调一调」，而是实现了一套搜狗 SSF 皮肤的解析与绘制层：直接读取 `skin.ini` 与原始 PNG，支持九宫格拉伸、逐像素 alpha 合成、皮肤自带字体与配色。状态栏关闭，中英提示以贴光标的皮肤图标呈现，2 秒后自动消失。
 
 关掉 SSF 后端（`style/ssf_enabled: false`）即完整回落到 Weasel 原生渲染，不影响其他行为。
+
+### HanLin 前端
+
+寒淋使用自研的 Windows TSF 文本服务（`HanLinTip.dll`），不再依赖小狼毫的 `WeaselTSF.dll`。前端只负责与 Windows 输入框架对接，拼音、词库、候选生成全部交给 librime 1.17.0。
+
+| 组件 | 作用 |
+|---|---|
+| `HanLinTip.dll`（x64 / x86） | TSF 文本服务，注册到 Windows 输入法列表 |
+| `HanLinHost.exe` | 后台进程，加载 `rime.dll` 并维护引擎会话 |
+| `HanLinIPC` | 前端与后台之间的命名管道协议 |
+| `rime.dll` | librime 1.17.0（含动态数字识别与学词补丁） |
+
+前端与后台分离的好处：引擎崩溃不会拖垮输入法进程，升级引擎只需替换 `rime.dll`。代价是多一层 IPC，按键延迟略高于进程内调用（实测约 5 ms）。
+
+### 图标系统
+
+输入法图标由 `src/build-support/gen-hanlin-icon.py` 生成，同一份字形产出 11 种尺寸：
+
+| 位置 | 图标 |
+|---|---|
+| 系统输入法切换入口 | 「淋」字主图标（珊瑚红三点水 + 黑色「林」） |
+| 任务栏语言栏 | 同上，小尺寸加粗描边 |
+| Shift 切换中英文 | 光标旁浮动「中」/「英」提示，2 秒后消失 |
+| 词条工具 | 同一份字形的小图标 |
+
+图标源文件在 `src/HanLin/icons/`，改字形后重跑生成脚本即可。
+
+### 词条工具
+
+`src/tools/WordManager.vbs` 双击启动「自造词管理」窗口，可以：
+
+- 列出全部自定义词条（标准词 / 编码 / 权重）
+- 查找、添加、编辑、删除
+- 一键部署（后台调用 `HanLinHost.exe --deploy`，带备份与回滚）
+
+工具读取 `custom_phrase.txt`，部署时重新生成 `mixed_tokens.dict.yaml`。详细说明见 [添加英文单词](docs/ADD-WORDS.md)。
 
 ### 数字与符号
 
@@ -130,39 +168,12 @@ keai，sunxiaochuan258。nihao                  →  可爱，孙笑川258。你
 
 ### 英文词条
 
-上游把英文作为次翻译器，打 `hello` / `world` 会出英文单词。本项目改为三层：
+自定义英文词在 `custom_phrase.txt` 保存一行。第一列是标准词，第二列是小写编码。添加或删除词条可以使用 [自造词管理工具](docs/ADD-WORDS.md)。
 
-| 层 | 机制 | 行为 |
-|---|---|---|
-| 纯英文单词 | `table_translator@melt_eng` | 已移除。`hello` → 合理了哦，不出英文 |
-| 中英混排词 | `table_translator@cn_en` | 保留。词库 1001 条全部含中文（`X光`、`T恤`、`红Buff`） |
-| 指定名词 | `custom_phrase` + `custom_phrase_complete` | 91 个白名单词，精确命中 + 前缀补全 |
+精确匹配和前缀补全都接受混合大小写。例如 `CHAtgpt`、`CHatG`、`chatg` 都会依次给出 `ChatGPT`、`chatgpt`、`CHATGPT`。相同文本只显示一次，例如 `CPU`、`cpu`。
 
-白名单为科技厂商、开发工具、语言与常用软件，按规范大小写写入，**用小写编码输入**。完整清单（编码、分类、是否参与造句）见 **[自定义字词总表](docs/CUSTOM-WORDS.md)**。
+完整词条见 [自定义字词总表](docs/CUSTOM-WORDS.md)。`mixed_tokens` 负责把符合条件的英文词带入中文整句，带数字的型号可以使用小键盘数字或已有短码。
 
-编码连续输入，例如 `visualstudio`、`platformio`。`STM32CubeMX` 可用小键盘数字输入 `stm32cubemx`，也可以输入短码 `stmcubemx`。
-
-前缀补全拆成两个翻译器，是为了避免高权重补全挤占单字母输入：`custom_phrase` 权重 99、关闭补全，负责精确码；`custom_phrase_complete` 权重 0.9、开启补全，负责 `chat` → `ChatGPT`。
-
-#### 大小写双份
-
-每个纯字母的英文候选，后面会紧跟一个**全小写**版本，方便写代码或填表单时直接选：
-
-```
-github  →  GitHub | github
-vscode  →  VSCode | vscode
-chatgpt →  ChatGPT | chatgpt
-githu   →  GitHub（补全）| github（补全）
-```
-
-由 `lua/lowercase_candidate_filter.lua` 实现，只处理**纯 ASCII 字母**：
-
-| 候选 | 是否生成小写版本 |
-|---|---|
-| `GitHub`、`VSCode`、`ChatGPT` | ✅ |
-| `ESP32`、`STM32`（含数字） | ❌ 型号不生成影子候选 |
-| `X光`（含中文） | ❌ |
-| `ffmpeg`（本来就全小写） | ❌ 不重复 |
 
 ### 计算器
 
@@ -208,7 +219,7 @@ cC 1 0 0 / 4      →  100/4=25.0
 静默安装（需在已提权终端中运行）：
 
 ```powershell
-HanLin-Setup-0.2.3.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
+HanLin-Setup-1.0.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 ```
 
 ### 安装布局
@@ -255,10 +266,10 @@ HanLin-Setup-0.2.3.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 | 小键盘 `+ - * /` | 按原义进入输入串 |
 | 小键盘 `KP_Decimal` | 输出 ASCII `.` |
 | `cC` + 小键盘数字/运算符 | 计算器，结果作为候选 |
-| 英文白名单（小写） | `chatgpt`、`cpu`、`vscode`；支持前缀 `chat` → `ChatGPT` |
+| 英文白名单 | `CHAtgpt`、`cpu`、`vscode`。支持混合大小写前缀补全 |
 | 语言栏左键 / 右键 | 状态指示 / 打开菜单 |
 
-英文词条**大小写都能出**：每条英文词条同时注册了小写编码和标准大小写编码，所以 `Desk` / `GitH` / `ChatG` / `Mark` 都能补全出 `Desktop` / `GitHub` / `ChatGPT` / `Markdown`。全大写输入（`DNA`）仍走方案的「大写字母造词」通道（`zuogeDNAjiance` → 做个DNA检测）。
+大小写匹配只作用于自定义英文编码。大写字母仍可参与整句，例如 `zuogeDNAjiance` → 做个DNA检测。
 
 ### 颠倒输入识别
 
@@ -316,7 +327,8 @@ nihaowoshiyanghanlin         →  Enter 或 Shift+Enter 都上屏 nihaowoshiyang
 | `rime_ice.dict.yaml` | 词库挂载表，包含大字表和 `mixed_tokens` |
 | `lua/keypad_input.lua` | 小键盘与数字混合输入处理器 |
 | `lua/dedupe_filter.lua` | 合并「文本与注释都相同」的重复候选 |
-| `lua/lowercase_candidate_filter.lua` | 英文候选后追加全小写版本 |
+| `lua/custom_phrase_case.lua` | 自定义英文词按小写编码匹配，保留输入时的大小写 |
+| `lua/lowercase_candidate_filter.lua` | 按标准、全小写、全大写排列自定义英文候选 |
 | `lua/short_prefix_filter.lua` | 抑制单字母前缀补全误触 |
 
 ### 白名单与词条
@@ -337,7 +349,7 @@ pwsh -File .\src\build-support\gen-mixed-tokens.ps1 `
 | 来源 | 权重 | 写在哪 | 作用 |
 |---|---|---|---|
 | 精确词条 | `initial_quality: 99` | `rime_ice.custom.yaml` → `custom_phrase` | 精确码（`chatgpt`）稳定首位 |
-| 前缀补全 | `initial_quality: 0.9` | `rime_ice.custom.yaml` → `custom_phrase_complete` | 补全（`chat`）能选到，但排在拼音之后 |
+| 前缀补全 | 短前缀保持普通权重，5 位起提高权重 | `custom_phrase_complete` 与 `custom_phrase_case.lua` | `chatg` 优先给出 `ChatGPT` 及大小写变体 |
 | 造句词条 | 第三列 `1000` / `100000` | `mixed_tokens.dict.yaml` | 一般词条 1000，ESP32、STM32 和专名 100000 |
 | 词库整体 | 列表顺序 | `rime_ice.dict.yaml` → `import_tables` | 越靠前权重越高 |
 
@@ -353,7 +365,7 @@ chat → ChatGPT 出现在中文之后，但可以选到
 | 想要 | 改哪里 | 说明 |
 |---|---|---|
 | 英文精确码压过中文 | `custom_phrase/initial_quality`（99 → 更高） | 单字母输入会开始出现英文，慎调 |
-| 前缀补全更靠前 | `custom_phrase_complete/initial_quality`（0.9 → 1.1~1.3） | 超过 1.2 后补全会挤到中文前 |
+| 调整英文前缀排序 | `custom_phrase_complete/initial_quality` 和 `lua/custom_phrase_case.lua` | 调整短前缀的中文与英文优先级 |
 | 某个词造句时更靠前 | `mixed_tokens.dict.yaml` 该行第三列 | 改完重新部署 |
 | 整个词库优先级 | `rime_ice.dict.yaml` 的 `import_tables` 顺序 | 越靠前越优先 |
 
@@ -387,7 +399,6 @@ pwsh -NoProfile -File (Join-Path $install 'Migrate-HanLinUserData.ps1') -Source 
 | 方向键在输入串两端环绕 | librime 1.13.1 限制（`_no_loop` 需 ≥ 1.16） |
 | 中文模式下主键盘 `.` 输出 `。` | 标点形态由中英模式决定；小数点请用小键盘 `KP_Decimal` |
 | 仅白名单内的英文词能出英文 | 有意设计，见[英文词条](#英文词条) |
-| 英文大小写都能补全 | 小写编码 + 标准大小写编码各一份；全大写仍走「大写字母造词」 |
 | 以词定字（`[` `]`）不可用 | 未保留 `select_character`，`[` `]` 归标点 |
 | 计算器只认小键盘 | 主键盘数字始终是选词键；只在 `cC` 模式下放行小键盘数字与运算符 |
 | 不做错音纠正（平翘舌、前后鼻音） | 模糊音会让 `zong` 也出「中/种」、`sen` 也出「神/深」，干扰大于收益；按标准拼音输入反而更顺手 |
@@ -417,7 +428,11 @@ pwsh -NoProfile -File (Join-Path $install 'Migrate-HanLinUserData.ps1') -Source 
 
 ### TSF 前端
 
-`src/WeaselTSF/` 负责按键、焦点、候选列表与语言栏。本项目在此层加入了退格拦截、候选窗生命周期管理与 SSF 渲染接入。**代码中不含任何键鼠钩子** —— 早期为「输入框外切换中英文」实现的全局钩子实测从未生效，已连同状态机一并移除。
+`src/HanLin/` 是自研的 TSF 文本服务，负责按键、焦点、候选列表、语言栏与中英状态提示。它通过命名管道与 `HanLinHost.exe` 通信，后者加载 `rime.dll` 并维护引擎会话。候选窗渲染复用 `src/WeaselUI/` 的 SSF 层。
+
+**代码中不含任何键鼠钩子** —— 早期为「输入框外切换中英文」实现的全局钩子实测从未生效，已连同状态机一并移除。
+
+上游的 `src/WeaselTSF/` 仍保留在仓库中作参考，寒淋不再使用它。
 
 ### 方案覆盖
 
@@ -470,6 +485,8 @@ cd HanLin-IME
 pwsh -NoProfile -File .\src\build-weasel.ps1
 pwsh -NoProfile -File .\src\build-hanlin.ps1 -EngineDll 'C:\Program Files\HanLin\rime.dll'
 ```
+
+`-EngineDll` 指向已安装寒淋的 `rime.dll`（或 `src\dist\rime.dll`）。`-RendererLibrary` 默认取 `src\msbuild\Release\x64\WeaselUI.lib`，需要先跑 `build-weasel.ps1` 生成。
 
 寒淋产物位于 `src\output\hanlin-tip-x64` 和 `src\output\hanlin-tip-x86`。x64 目录也包含 `HanLinHost.exe` 与 `rime.dll`。`src\output\HanLinBuild.json` 记录前端源码指纹、版本和产物哈希。
 
@@ -542,23 +559,27 @@ cmd /c .\src\build-support\build-dict-probe.cmd
 仓库直接位于小狼毫安装目录下，源码在同级 `src/`：
 
 ```
-D:\Rime\                     # 仓库根 = 小狼毫安装目录
-├── src/                     # 定制版 Weasel 源码（上游 0.17.4 + 本项目改动）
-│   ├── WeaselTSF/           #   TSF 输入服务：按键、焦点、候选列表、语言栏
-│   ├── WeaselUI/            #   候选窗渲染
+D:\Rime\                     # 仓库根
+├── src/
+│   ├── HanLin/              # 自研 TSF 前端（HanLinTip.dll + HanLinHost.exe）
+│   │   ├── icons/           #   图标源文件
+│   │   └── HanLinVersion.rc #   版本资源
+│   ├── WeaselUI/            # 候选窗渲染
 │   │   └── ssf/             #   搜狗 SSF 皮肤兼容层
-│   ├── WeaselServer/        #   服务进程与托盘
-│   ├── WeaselDeployer/      #   部署程序（重新部署 / 配置）
-│   ├── WeaselSetup/         #   安装程序
-│   ├── RimeWithWeasel/      #   引擎与 UI 的粘合
-│   ├── include/             #   公共头
-│   ├── build-libs/          #   librime 导入库
-│   ├── build-support/       #   构建/测试辅助脚本
-│   ├── installer/           #   安装包构建（Inno Setup + payload）
-│   └── test/TestSsfSkin/    #   回归测试
+│   ├── WeaselTSF/           # 上游 TSF 代码（保留作参考，寒淋不再使用）
+│   ├── WeaselServer/        # 上游服务进程与托盘（保留作参考）
+│   ├── WeaselDeployer/      # 部署程序
+│   ├── WeaselSetup/         # 安装程序
+│   ├── RimeWithWeasel/      # 引擎与 UI 的粘合
+│   ├── include/             # 公共头
+│   ├── build-libs/          # librime 导入库
+│   ├── build-support/       # 构建/测试辅助脚本
+│   ├── installer/           # 安装包构建（Inno Setup + payload）
+│   ├── tools/               # 词条管理工具（WordManager）
+│   └── test/                # 回归测试（TestSsfSkin / TestHanLin）
 ├── assets/Color-P/          # 皮肤原始资源（skin.ini + 27 个图片）
 ├── rime-config/             # 运行时配置与词条
-├── docs/                    # 文档（CUSTOM-WORDS.md 等）
+├── docs/                    # 文档（CUSTOM-WORDS.md、ADD-WORDS.md 等）
 ├── reference/               # 第三方快照，仅作查阅
 ├── weasel-0.17.4/           # 已安装的小狼毫本体（不入库）
 ├── CHANGELOG.md             # 版本判定与发布记录
@@ -644,7 +665,7 @@ snapshot ──► master ──► tag + Release
 
 | 位 | 条件 | 示例 |
 |---|---|---|
-| `MAJOR` | 不兼容的大改 | 尚未发生，留给 `1.0.0` |
+| `MAJOR` | 不兼容的大改 | `0.2.3 → 1.0.0`（首个正式版） |
 | `MINOR` | 成体系的新能力（新增输入方式、整套配置、大范围重构） | `0.0.6 → 0.1.0` |
 | `PATCH` | 修 bug、调参数、换词库、**局部小功能** | `0.0.1 → 0.0.6`、`0.1.3 → 0.1.4` |
 
@@ -654,7 +675,11 @@ snapshot ──► master ──► tag + Release
 
 | 版本 | 说明 |
 |---|---|
-| **0.1.6** | 当前稳定版：颠倒输入识别（40 种）、回退模糊音纠错 |
+| **1.0.0** | 首个正式版：自研前端稳定、词条工具、图标系统、README 重构 |
+| 0.2.2 | 缓存指纹刷新、版本单一来源、打包校验、迁移脚本 |
+| 0.2.1 | 恢复中英文混排（仅白名单英文） |
+| 0.2.0 | 自研 HanLin 前端、librime 1.17.0、动态数字识别、移除 cn_en |
+| 0.1.6 | 颠倒输入识别（40 种）、回退模糊音纠错 |
 | 0.1.5 | 错音纠正（模糊音，0.1.6 已回退）、大小写双份、Shift+Enter 修复 |
 | 0.1.4 | 白名单 80 词、修复计算器、README 重构 |
 | 0.1.3 | 候选去重、白名单 77 词、修复候选框幽灵复现 |

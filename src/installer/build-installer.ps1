@@ -77,6 +77,11 @@ foreach ($artifact in (Get-HanLinBuildArtifacts).GetEnumerator()) {
     }
 }
 Copy-PayloadFile (Join-Path $root 'Migrate-HanLinUserData.ps1') (Join-Path $payload 'Migrate-HanLinUserData.ps1')
+foreach ($tool in 'WordManager.ps1', 'WordManagerData.ps1', 'WordManagerDeployment.ps1', 'WordManager.vbs', 'hanlin-word-icon.png') {
+    Copy-PayloadFile (Join-Path $src "tools\$tool") (Join-Path $payload "tools\$tool")
+}
+Copy-PayloadFile (Join-Path $src 'build-support\gen-mixed-tokens.ps1') (Join-Path $payload 'tools\gen-mixed-tokens.ps1')
+Copy-PayloadFile (Join-Path $src 'HanLin\icons\hanlin.ico') (Join-Path $payload 'tools\hanlin.ico')
 
 New-Item -ItemType Directory -Path $data,$preset -Force | Out-Null
 foreach ($item in Get-ChildItem -LiteralPath $SharedDataDir) {

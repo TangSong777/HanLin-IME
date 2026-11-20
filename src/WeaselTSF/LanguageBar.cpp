@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include <resource.h>
+#include <HanLinIcons.h>
 #include <thread>
 #include <shellapi.h>
 #include "WeaselTSF.h"
@@ -200,28 +201,13 @@ STDMETHODIMP CLangBarItemButton::OnMenuSelect(UINT wID) {
 }
 
 STDMETHODIMP CLangBarItemButton::GetIcon(HICON* phIcon) {
-  if (ascii_mode) {
-    if (_style.current_ascii_icon.empty())
-      *phIcon = (HICON)LoadImageW(g_hInst, MAKEINTRESOURCEW(IDI_EN), IMAGE_ICON,
-                                  GetSystemMetrics(SM_CXSMICON),
-                                  GetSystemMetrics(SM_CYSMICON), LR_SHARED);
-    else
-      *phIcon =
-          (HICON)LoadImageW(NULL, _style.current_ascii_icon.c_str(), IMAGE_ICON,
-                            GetSystemMetrics(SM_CXSMICON),
-                            GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE);
-  } else {
-    if (_style.current_zhung_icon.empty())
-      *phIcon = (HICON)LoadImageW(g_hInst, MAKEINTRESOURCEW(IDI_ZH), IMAGE_ICON,
-                                  GetSystemMetrics(SM_CXSMICON),
-                                  GetSystemMetrics(SM_CYSMICON), LR_SHARED);
-    else
-      *phIcon =
-          (HICON)LoadImageW(NULL, _style.current_zhung_icon.c_str(), IMAGE_ICON,
-                            GetSystemMetrics(SM_CXSMICON),
-                            GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE);
-  }
-  return (*phIcon == NULL) ? E_FAIL : S_OK;
+  if (!phIcon) return E_POINTER;
+  const auto& path = ascii_mode ? _style.current_ascii_icon : _style.current_zhung_icon;
+  const auto resource = MAKEINTRESOURCEW(ascii_mode ? IDI_HANLIN_MODE_ENGLISH : IDI_HANLIN_MODE_CHINESE);
+  *phIcon = static_cast<HICON>(LoadImageW(path.empty() ? g_hInst : nullptr,
+      path.empty() ? resource : path.c_str(), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+      GetSystemMetrics(SM_CYSMICON), path.empty() ? LR_DEFAULTCOLOR : LR_LOADFROMFILE));
+  return *phIcon ? S_OK : E_FAIL;
 }
 
 STDMETHODIMP CLangBarItemButton::GetText(BSTR* pbstrText) {

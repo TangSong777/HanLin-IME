@@ -1,4 +1,5 @@
 #include "TsfObjects.h"
+#include "../include/HanLinIcons.h"
 
 #include <olectl.h>
 
@@ -201,7 +202,7 @@ HRESULT ModeButton::GetInfo(TF_LANGBARITEMINFO* out) {
   *out = {};
   out->clsidService = kTip;
   out->guidItem = GUID_LBI_INPUTMODE;
-  out->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_SHOWNINTRAY | TF_LBI_STYLE_TEXTCOLORICON;
+  out->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_SHOWNINTRAY;
   wcscpy_s(out->szDescription, kName);
   return S_OK;
 }
@@ -237,38 +238,9 @@ HRESULT ModeButton::UnadviseSink(DWORD cookie) {
 
 HRESULT ModeButton::GetIcon(HICON* out) {
   if (!out) return E_POINTER;
-  *out = nullptr;
-  constexpr int size = 16;
-  BITMAPINFO info{};
-  info.bmiHeader.biSize = sizeof(info.bmiHeader);
-  info.bmiHeader.biWidth = size;
-  info.bmiHeader.biHeight = -size;
-  info.bmiHeader.biPlanes = 1;
-  info.bmiHeader.biBitCount = 32;
-  void* bits = nullptr;
-  HDC dc = CreateCompatibleDC(nullptr);
-  HBITMAP color = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
-  WORD clear_mask[size]{};
-  HBITMAP mask = CreateBitmap(size, size, 1, 1, clear_mask);
-  if (dc && color && mask && bits) {
-    const auto old_bitmap = SelectObject(dc, color);
-    const auto old_font = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
-    RECT rect{0, 0, size, size};
-    FillRect(dc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(255, 255, 255));
-    DrawTextW(dc, ascii_ ? L"英" : L"中", 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    GdiFlush();
-    auto* pixels = static_cast<uint32_t*>(bits);
-    for (int i = 0; i < size * size; ++i) pixels[i] = (pixels[i] & 0xff) << 24;
-    SelectObject(dc, old_font);
-    SelectObject(dc, old_bitmap);
-    ICONINFO icon{TRUE, 0, 0, mask, color};
-    *out = CreateIconIndirect(&icon);
-  }
-  if (mask) DeleteObject(mask);
-  if (color) DeleteObject(color);
-  if (dc) DeleteDC(dc);
+  const auto resource = MAKEINTRESOURCEW(ascii_ ? IDI_HANLIN_MODE_ENGLISH : IDI_HANLIN_MODE_CHINESE);
+  *out = static_cast<HICON>(LoadImageW(module_instance, resource, IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
   return *out ? S_OK : E_FAIL;
 }
 

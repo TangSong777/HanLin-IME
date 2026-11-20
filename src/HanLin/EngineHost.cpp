@@ -246,6 +246,7 @@ class EngineHost {
     }
     const auto id = session.rime;
     bool handled = true;
+    bool show_mode_tip = false;
     switch (request.command) {
       case Command::Close:
         RemoveSession(it);
@@ -267,20 +268,25 @@ class EngineHost {
         api_->set_option(id, "ascii_mode", request.args[0] != 0);
         if (global_ascii_) ascii_ = request.args[0] != 0;
         break;
-      case Command::Key:
+      case Command::Key: {
         SetActive(request.session);
         if (global_ascii_ && !!api_->get_option(id, "ascii_mode") != ascii_)
           api_->set_option(id, "ascii_mode", ascii_);
+        const bool shift = request.args[0] == XK_Shift_L || request.args[0] == XK_Shift_R;
+        const bool before = shift && api_->get_option(id, "ascii_mode") != 0;
         handled = api_->process_key(id, request.args[0], request.args[1]) != 0;
-        if (global_ascii_) {
+        if (shift || global_ascii_) {
           const bool mode = api_->get_option(id, "ascii_mode") != 0;
-          const bool shift = request.args[0] == XK_Shift_L || request.args[0] == XK_Shift_R;
-          if (ui_.style().ssf_enabled && !shift && mode != ascii_)
-            api_->set_option(id, "ascii_mode", ascii_);
-          else
-            ascii_ = mode;
+          show_mode_tip = shift && mode != before;
+          if (global_ascii_) {
+            if (ui_.style().ssf_enabled && !shift && mode != ascii_)
+              api_->set_option(id, "ascii_mode", ascii_);
+            else
+              ascii_ = mode;
+          }
         }
         break;
+      }
       case Command::Select:
         if (request.args[0] < 0 || request.args[0] >= static_cast<int32_t>(kMaxCandidates)) return {};
         handled = Select(id, request.args[0]);
@@ -304,6 +310,8 @@ class EngineHost {
     }
     state.menu_revision = session.menu_revision;
     if (active_ == request.session) {
+      mode_tip_pending_ = show_mode_tip && !state.composing;
+      if (mode_tip_pending_) has_caret_ = state.has_caret = false;
       frame_ = state;
       frame_.commit.clear();
       frame_changed_ = true;
@@ -445,6 +453,7 @@ class EngineHost {
   void Blur() {
     active_ = 0;
     has_caret_ = false;
+    mode_tip_pending_ = false;
     rendered_menu_revision_ = 0;
     frame_ = {};
     ui_.Hide();
@@ -469,7 +478,8 @@ class EngineHost {
     caret_ = caret;
     has_caret_ = show_popup;
     if (!show_popup) rendered_menu_revision_ = 0;
-    if (changed || (show_popup && frame_.composing && !ui_.panel_hwnd())) SchedulePresent();
+    if (changed || (show_popup && (frame_.composing || mode_tip_pending_) && !ui_.panel_hwnd()))
+      SchedulePresent();
     State acknowledgement;
     acknowledgement.session = request.session;
     acknowledgement.handled = true;
@@ -478,13 +488,24 @@ class EngineHost {
   }
 
   void Present(const State& state) {
-    if (!state.composing || !has_caret_) {
+    if (!has_caret_ || (!state.composing && !mode_tip_pending_)) {
       rendered_menu_revision_ = 0;
       ui_.Hide();
       return;
     }
     const bool needs_window = !ui_.panel_hwnd();
     if (needs_window && !ui_.Create(nullptr)) return;
+    if (mode_tip_pending_) {
+      weasel::Status status;
+      status.ascii_mode = state.ascii;
+      status.show_mode_tip = true;
+      ui_.Update({}, status);
+      ui_.UpdateInputPosition(caret_);
+      ui_.ShowWithTimeout(2000);
+      mode_tip_pending_ = false;
+      rendered_menu_revision_ = 0;
+      return;
+    }
     if (frame_changed_ || needs_window || !ui_.IsShown()) {
       weasel::Context context;
       if (!state.inline_preedit) context.preedit.str = state.preedit;
@@ -575,6 +596,7 @@ class EngineHost {
   uint32_t rendered_menu_revision_ = 0;
   RECT caret_{};
   bool has_caret_ = false;
+  bool mode_tip_pending_ = false;
   bool frame_changed_ = false;
   bool present_scheduled_ = false;
   bool global_ascii_ = false;

@@ -12,8 +12,6 @@ sort: by_weight
 
 ESP32	esp32	100000
 STM32	stm32	100000
-STM32CubeIDE	stm32cubeide	1000
-STM32CubeMX	stm32cubemx	1000
 杨寒淋	yanghanlin	100000
 ChatGPT	chatgpt	1000
 Gemini	gemini	1000
@@ -53,7 +51,9 @@ PyCharm	pycharm	1000
 Multisim	multisim	1000
 SolidWorks	solidworks	1000
 STM32CubeMX	stmcubemx	1000
+STM32CubeMX	stm32cubemx	1000
 STM32CubeIDE	stmcubeide	1000
+STM32CubeIDE	stm32cubeide	1000
 Keil	keil	1000
 PlatformIO	platformio	1000
 Blender	blender	1000
@@ -88,3 +88,4 @@ Cloudflare	cloudflare	1000
 Steam	steam	1000
 stream	stream	1000
 CommandCode	commandcode	1000
+Transformer	transformer	1000

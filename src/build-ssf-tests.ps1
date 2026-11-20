@@ -35,7 +35,7 @@ $sources = @(
 $defines = @('NOMINMAX', 'WIN32_LEAN_AND_MEAN', '_UNICODE', 'UNICODE', 'NDEBUG')
 
 $flags = @(
-  '/nologo', '/c', '/TP', '/MT', '/O2', '/Oi', '/EHsc', '/GR',
+  '/nologo', '/c', '/TP', '/MT', '/O2', '/Oi', '/EHsc', '/GR', '/std:c++17',
   '/Zc:wchar_t', '/Zc:forScope', '/Zc:inline', '/GS', '/Gy', '/fp:precise',
   '/Gd', '/utf-8', '/W3', '/wd4996',
   "/I`"$Root`"",

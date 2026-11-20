@@ -96,7 +96,7 @@ HRESULT RegisterTip() {
   result = RegisterCom(image);
   if (FAILED(result)) return result;
   result = profiles->RegisterProfile(kTip, kLanguage, kProfile, kName,
-      static_cast<ULONG>(std::size(kName) - 1), nullptr, 0, 0, nullptr, 0, FALSE, 0);
+      static_cast<ULONG>(std::size(kName) - 1), image, size, 0, nullptr, 0, FALSE, 0);
   if (SUCCEEDED(result)) {
     for (const auto* category : kCategories) {
       result = categories->RegisterCategory(kTip, *category, kTip);

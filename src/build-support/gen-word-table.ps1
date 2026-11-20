@@ -17,6 +17,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $enc = New-Object Text.UTF8Encoding($false)
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'tools\WordManagerData.ps1')
 
 foreach ($f in @($CustomPhrase, $MixedTokens)) {
   if (-not (Test-Path $f)) { throw "找不到 $f" }
@@ -46,19 +47,10 @@ function Get-Category([string]$word) {
 }
 
 # ---- 读 custom_phrase.txt ----
-$rows = [IO.File]::ReadAllLines($CustomPhrase, $enc) |
-        Where-Object { $_ -match "`t" -and $_ -notmatch '^#' }
-
-$english = @()
-$chinese = @()
-foreach ($line in $rows) {
-  $p = $line -split "`t"
-  $word = $p[0]; $code = $p[1]
-  # 标准大小写变体（VSCode<Tab>VSCode）只是让大写输入也能补全，不重复计入词条数。
-  if ($word -ceq $code -and $word -cmatch '[A-Z]') { continue }
-  if ($word -match '[^\x00-\x7F]') { $chinese += [pscustomobject]@{ Word = $word; Code = $code } }
-  else                             { $english += [pscustomobject]@{ Word = $word; Code = $code } }
-}
+$rows = @(Read-WordEntries $CustomPhrase)
+$english = @($rows | Where-Object { $_.Word -notmatch '[^\x00-\x7F]' })
+$chinese = @($rows | Where-Object { $_.Word -match '[^\x00-\x7F]' })
+$englishGroups = @($english | Group-Object Word -CaseSensitive)
 
 # ---- 读 mixed_tokens.dict.yaml（词条 / 编码 / 权重）----
 $tokens = @()
@@ -89,25 +81,29 @@ Add-Line '> 造句词表 `mixed_tokens` 由 `custom_phrase.txt` 和额外词条�
 Add-Line ''
 Add-Line '| 类别 | 数量 | 输入方式 | 参与造句 |'
 Add-Line '|---|---:|---|---|'
-Add-Line "| 英文白名单 | $($english.Count) | 小写编码 | $sentenceCount 条 |"
+Add-Line "| 英文白名单 | $($englishGroups.Count) 个词 / $($english.Count) 个编码 | 小写编码 | $sentenceCount 个编码 |"
 Add-Line "| 中文短码 | $($chinese.Count) | 单/双字母 | — |"
 Add-Line '| 动态数字 | 引擎识别 | 小键盘数字 | ✅ |'
 Add-Line "| **合计自维护词条** | $($english.Count + $chinese.Count) | — | — |"
 Add-Line ''
 
 # ---- 英文白名单 ----
-Add-Line "## 英文白名单（$($english.Count) 条）"
+Add-Line "## 英文白名单（$($englishGroups.Count) 个词 / $($english.Count) 个编码）"
 Add-Line ''
-Add-Line '按分类排列。编码一律小写；**输入时必须小写**（大写走方案的「大写字母造词」通道）。'
+Add-Line '按分类排列。词表保存标准词与小写编码，精确匹配和前缀补全都接受混合大小写。'
 Add-Line ''
 Add-Line '| # | 词条 | 编码 | 分类 | 参与造句 |'
 Add-Line '|---:|---|---|---|:---:|'
 $i = 0
-$ordered = $english | Sort-Object @{ Expression = { $categories.Keys.IndexOf((Get-Category $_.Word)) } }, Word
-foreach ($e in $ordered) {
+$ordered = $englishGroups | Sort-Object @{ Expression = { $categories.Keys.IndexOf((Get-Category $_.Name)) } }, Name
+foreach ($group in $ordered) {
   $i++
-  $join = if ($tokenPairs.Contains("$($e.Word)`t$($e.Code)")) { '✅' } else { '—' }
-  Add-Line "| $i | $($e.Word) | ``$($e.Code)`` | $(Get-Category $e.Word) | $join |"
+  $codes = (@($group.Group | ForEach-Object { '`' + $_.Code + '`' }) -join '、')
+  $sentence = @($group.Group | Where-Object { $tokenPairs.Contains("$($_.Word)`t$($_.Code)") })
+  $join = if ($sentence.Count -eq $group.Count) { '✅' } elseif ($sentence.Count) {
+    (@($sentence | ForEach-Object { '`' + $_.Code + '`' }) -join '、')
+  } else { '—' }
+  Add-Line "| $i | $($group.Name) | $codes | $(Get-Category $group.Name) | $join |"
 }
 Add-Line ''
 
@@ -164,7 +160,7 @@ Add-Line '## 使用规则'
 Add-Line ''
 Add-Line '| 规则 | 说明 |'
 Add-Line '|---|---|'
-Add-Line '| 编码一律小写 | 打 `CPU` 得到的是大写字母造词，不是词条 |'
+Add-Line '| 英文编码不区分大小写 | `CHAtgpt` 与 `ChAtg` 都可得到 `ChatGPT`、`chatgpt`、`CHATGPT` |'
 Add-Line '| 编码与词条都不含空格 | `visualstudio`、`platformio` |'
 Add-Line '| 型号支持数字与部分短码 | `STM32CubeMX` 可用 `stm32cubemx` 或 `stmcubemx` |'
 Add-Line '| 主键盘数字只选词 | 1–9（0 = 第 10 个）永远是选词，不会进入编码 |'
@@ -177,9 +173,8 @@ Add-Line '## 如何增删词条'
 Add-Line ''
 Add-Line '| 想改什么 | 改哪里 | 之后做什么 |'
 Add-Line '|---|---|---|'
-Add-Line '| 英文词 / 中文短码 | `custom_phrase.txt`（`词条<Tab>编码`） | 重新部署 |'
+Add-Line '| 英文词 / 中文短码 | [自定义词条工具](ADD-WORDS.md) | 点击「部署词条」 |'
 Add-Line '| 造句词条 | 从 `custom_phrase.txt` 重新生成 `mixed_tokens.dict.yaml` | 重新部署 |'
-Add-Line '| 本表格 | 重跑 `gen-word-table.ps1` | 提交 |'
 Add-Line ''
 Add-Line '---'
 Add-Line ''

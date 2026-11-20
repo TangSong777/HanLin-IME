@@ -7,6 +7,7 @@
 
 #include <atlbase.h>
 #include <msctf.h>
+#include <shlobj.h>
 
 #include <filesystem>
 #include <cstdlib>
@@ -1291,9 +1292,29 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
 
   // style
   if (!session_status.__synced) {
+    UIStyle client_style = session_status.style;
+    if (client_style.ssf_enabled &&
+        (client_style.current_zhung_icon.empty() ||
+         client_style.current_ascii_icon.empty())) {
+      // Clients that already loaded an older TIP can read the new mode
+      // artwork through the existing icon paths when they reconnect.
+      wchar_t common_data[MAX_PATH]{};
+      if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_COMMON_APPDATA, nullptr,
+                                    SHGFP_TYPE_CURRENT, common_data))) {
+        const auto icons = fs::path(common_data) / L"ColorPWeasel" / L"Icons";
+        const auto use_default = [&](std::wstring& path, const wchar_t* file) {
+          if (!path.empty()) return;
+          std::error_code error;
+          const auto icon = icons / file;
+          if (fs::is_regular_file(icon, error)) path = icon.wstring();
+        };
+        use_default(client_style.current_zhung_icon, L"mode-chinese.ico");
+        use_default(client_style.current_ascii_icon, L"mode-english.ico");
+      }
+    }
     std::wstringstream ss;
     boost::archive::text_woarchive oa(ss);
-    oa << session_status.style;
+    oa << client_style;
 
     actions.push_back("style");
     body.append(L"style=").append(ss.str()).append(L"\n");

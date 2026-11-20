@@ -18,6 +18,7 @@
 #include "ssf/SsfLayout.h"
 #include "ssf/SsfSkin.h"
 #include "ssf/SsfVisibility.h"
+#include "ModeTipPlacement.h"
 
 using namespace weasel::ssf;
 
@@ -1030,6 +1031,43 @@ void TestNormalizeDefaults() {
   CheckEq(s4.zhongwen_first_color.a, 255, "first-candidate colour made opaque");
 }
 
+void TestModeTipPlacement() {
+  g_case = "caret mode tip placement";
+  const RECT work{0, 0, 600, 400};
+  const RECT caret{200, 180, 201, 201};
+  const SIZE size{25, 25};
+  const auto preferred = weasel::PlaceModeTip(caret, size, work, {}, 4);
+  Check(preferred && preferred->right == 196 && preferred->top == 205,
+        "place the icon to the left and below the caret");
+
+  const RECT lower_left{166, 202, 238, 244};
+  const RECT farther_left{95, 201, 165, 241};
+  const auto avoided = weasel::PlaceModeTip(caret, size, work,
+                                           {lower_left, farther_left}, 4);
+  RECT overlap;
+  Check(avoided && !IntersectRect(&overlap, &*avoided, &lower_left) &&
+            !IntersectRect(&overlap, &*avoided, &farther_left),
+        "avoid all candidate rectangles");
+  Check(avoided && avoided->right < caret.left && avoided->top > caret.bottom,
+        "keep the preferred side when there is room around the candidates");
+
+  const RECT edge_caret{2, 385, 2, 400};
+  const auto edge = weasel::PlaceModeTip(edge_caret, size, work, {}, 4);
+  Check(edge && edge->left >= work.left && edge->top >= work.top &&
+            edge->right <= work.right && edge->bottom <= work.bottom &&
+            !IntersectRect(&overlap, &*edge, &edge_caret),
+        "use a position inside the work area near monitor edges");
+  const RECT left_monitor{-720, 0, 0, 400};
+  const auto secondary = weasel::PlaceModeTip({-310, 80, -309, 99}, size,
+                                               left_monitor, {}, 6);
+  Check(secondary && secondary->right == -316 && secondary->top == 105,
+        "honor negative coordinates and scaled gaps");
+  Check(!weasel::PlaceModeTip(caret, size, work, {work}, 4),
+        "keep the tip hidden when a candidate covers all available space");
+  Check(!weasel::PlaceModeTip({}, size, work, {}, 4),
+        "wait for a real caret");
+}
+
 }  // namespace
 
 int wmain() {
@@ -1057,6 +1095,7 @@ int wmain() {
   TestLayoutScale();
   TestStatusBarLayout();
   TestNoImagesLayoutStillSane();
+  TestModeTipPlacement();
 
   TestNineSliceIdentity();
   TestNineSliceStretch();

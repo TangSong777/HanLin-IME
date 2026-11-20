@@ -38,8 +38,6 @@ $lines.AddRange([string[]]@(
 $extra = @(
   @('ESP32', 'esp32', '100000'),
   @('STM32', 'stm32', '100000'),
-  @('STM32CubeIDE', 'stm32cubeide', '1000'),
-  @('STM32CubeMX', 'stm32cubemx', '1000'),
   @('杨寒淋', 'yanghanlin', '100000')
 )
 $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)

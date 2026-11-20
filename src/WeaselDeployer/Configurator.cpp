@@ -138,13 +138,10 @@ int Configurator::UpdateWorkspace(bool report_errors) {
     client.StartMaintenance();
   }
 
-  {
-    RimeApi* rime = rime_get_api();
-    // initialize default config, preset schemas
-    rime->deploy();
-    // initialize weasel config
-    rime->deploy_config_file("weasel.yaml", "config_version");
-  }
+  RimeApi* rime = rime_get_api();
+  const bool workspace = rime->deploy() != False;
+  const bool frontend =
+      rime->deploy_config_file("weasel.yaml", "config_version") != False;
 
   CloseHandle(hMutex);  // should be closed before resuming service.
 
@@ -152,7 +149,7 @@ int Configurator::UpdateWorkspace(bool report_errors) {
     LOG(INFO) << "Resuming service.";
     client.EndMaintenance();
   }
-  return 0;
+  return workspace && frontend ? 0 : 1;
 }
 
 int Configurator::DictManagement() {

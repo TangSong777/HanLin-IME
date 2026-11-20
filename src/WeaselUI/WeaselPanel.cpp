@@ -1,71 +1,25 @@
 #include "stdafx.h"
 #include "WeaselPanel.h"
+#include "ModeTipPlacement.h"
 
 #include <utility>
 #include <ShellScalingApi.h>
 #include <VersionHelpers.hpp>
 #include <WeaselIPCData.h>
+#include <HanLinIcons.h>
 #include <algorithm>
 
 namespace {
 constexpr UINT kAvoidCandidateMessage = WM_APP + 0x517;
 const wchar_t* kPanelRole = L"WeaselColorPPanelRole";
-struct AvoidCandidateData {
-  HWND self;
-  RECT rect;
-  RECT work;
-  bool moved = false;
-};
-BOOL CALLBACK AvoidCandidateWindow(HWND window, LPARAM param) {
-  auto& data = *reinterpret_cast<AvoidCandidateData*>(param);
-  if (window == data.self || !IsWindowVisible(window) ||
-      GetPropW(window, kPanelRole) != reinterpret_cast<HANDLE>(1))
-    return TRUE;
-  RECT candidate, overlap;
-  if (!GetWindowRect(window, &candidate)) return TRUE;
-  InflateRect(&candidate, 6, 6);
-  if (!IntersectRect(&overlap, &data.rect, &candidate)) return TRUE;
-  const int width = data.rect.right - data.rect.left;
-  const int height = data.rect.bottom - data.rect.top;
-  const POINT choices[] = {
-      {candidate.left - width, data.rect.top},
-      {candidate.right, data.rect.top},
-      {data.rect.left, candidate.top - height},
-      {data.rect.left, candidate.bottom}};
-  for (const POINT& point : choices) {
-    RECT next{point.x, point.y, point.x + width, point.y + height};
-    if (next.left < data.work.left || next.right > data.work.right ||
-        next.top < data.work.top || next.bottom > data.work.bottom)
-      continue;
-    data.rect = next;
-    data.moved = true;
-    break;
+BOOL CALLBACK CollectCandidateRects(HWND window, LPARAM param) {
+  if (IsWindowVisible(window) &&
+      GetPropW(window, kPanelRole) == reinterpret_cast<HANDLE>(1)) {
+    RECT bounds;
+    if (GetWindowRect(window, &bounds))
+      reinterpret_cast<std::vector<RECT>*>(param)->push_back(bounds);
   }
   return TRUE;
-}
-bool AvoidCandidates(HWND self, RECT& rect) {
-  MONITORINFO info{sizeof(MONITORINFO)};
-  if (!GetMonitorInfo(MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST), &info))
-    return false;
-  AvoidCandidateData data{self, rect, info.rcWork};
-  // Reuse the visible candidate handle; rescan only when its lifetime changes.
-  static thread_local HWND candidate_cache = nullptr;
-  if (candidate_cache && IsWindowVisible(candidate_cache) &&
-      GetPropW(candidate_cache, kPanelRole) == reinterpret_cast<HANDLE>(1)) {
-    AvoidCandidateWindow(candidate_cache, reinterpret_cast<LPARAM>(&data));
-  } else {
-    candidate_cache = nullptr;
-    EnumWindows([](HWND window, LPARAM param) -> BOOL {
-      if (IsWindowVisible(window) && GetPropW(window, kPanelRole) == reinterpret_cast<HANDLE>(1)) {
-        *reinterpret_cast<HWND*>(param) = window;
-        return FALSE;
-      }
-      return TRUE;
-    }, reinterpret_cast<LPARAM>(&candidate_cache));
-    if (candidate_cache) AvoidCandidateWindow(candidate_cache, reinterpret_cast<LPARAM>(&data));
-  }
-  rect = data.rect;
-  return data.moved;
 }
 BOOL CALLBACK NotifyModeTip(HWND window, LPARAM) {
   if (IsWindowVisible(window) &&
@@ -410,7 +364,8 @@ void WeaselPanel::Refresh() {
 }
 
 void WeaselPanel::_InitFontRes(bool forced) {
-  HMONITOR hMonitor = MonitorFromRect(m_inputPos, MONITOR_DEFAULTTONEAREST);
+  HMONITOR hMonitor = MonitorFromRect(_IsModeTip() ? m_caret : m_inputPos,
+                                     MONITOR_DEFAULTTONEAREST);
   UINT dpiX = 96, dpiY = 96;
   if (hMonitor)
     GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
@@ -1213,6 +1168,12 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
   return drawn;
 }
 
+bool WeaselPanel::_LoadModeTipIcon(CIcon& icon, int width, int height) const {
+  if (!_IsModeTip()) return false;
+  const auto resource = m_status.ascii_mode ? IDI_HANLIN_MODE_ENGLISH : IDI_HANLIN_MODE_CHINESE;
+  return icon.LoadIconW(resource, width, height, LR_DEFAULTCOLOR) != FALSE;
+}
+
 // draw client area
 void WeaselPanel::DoPaint(CDCHandle dc) {
   if (weasel::ssf::SuppressEmptyWindow(m_style.ssf_enabled, m_ctx.empty(),
@@ -1381,8 +1342,10 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
                                              : (m_status.full_shape
                                                     ? m_iconFull
                                                     : m_iconHalf))));
-      memDC.DrawIconEx(iconRect.left, iconRect.top, icon, iconRect.Width(),
-                       iconRect.Height());
+      CIcon modeTip;
+      const bool branded = _LoadModeTipIcon(modeTip, iconRect.Width(), iconRect.Height());
+      memDC.DrawIconEx(iconRect.left, iconRect.top, branded ? modeTip : icon,
+                       iconRect.Width(), iconRect.Height());
       drawn = true;
     }
     /* Nothing drawn, hide candidate window */
@@ -1449,14 +1412,25 @@ LRESULT WeaselPanel::OnDestroy(UINT uMsg,
   return 0;
 }
 
-void WeaselPanel::_MoveModeTipTo(const RECT& rc) {
-  if (EqualRect(&m_inputPos, &rc) && IsWindowVisible()) return;
-  m_inputPos = rc;
-  _RepositionWindow(true);
-  RECT target;
-  if (::GetWindowRect(m_hWnd, &target) && AvoidCandidates(m_hWnd, target))
-    ::SetWindowPos(m_hWnd, HWND_TOPMOST, target.left, target.top, 0, 0,
-                   SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
+void WeaselPanel::_RepositionModeTip() {
+  m_modeTipPlaced = false;
+  MONITORINFO monitor{sizeof(monitor)};
+  RECT window;
+  if (m_caret.bottom > m_caret.top &&
+      GetMonitorInfo(MonitorFromRect(m_caret, MONITOR_DEFAULTTONEAREST), &monitor) &&
+      ::GetWindowRect(m_hWnd, &window)) {
+    std::vector<RECT> candidates;
+    EnumWindows(CollectCandidateRects, reinterpret_cast<LPARAM>(&candidates));
+    const SIZE size{window.right - window.left, window.bottom - window.top};
+    const auto target = weasel::PlaceModeTip(
+        m_caret, size, monitor.rcWork, std::move(candidates), (std::max)(2, DPI_SCALE(4)));
+    if (target) {
+      m_modeTipPlaced = (target->left == window.left && target->top == window.top) ||
+          SetWindowPos(HWND_TOPMOST, target->left, target->top, 0, 0,
+                       SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
+    }
+  }
+  if (!m_modeTipPlaced && IsWindowVisible()) ShowWindow(SW_HIDE);
 }
 
 LRESULT WeaselPanel::OnTimerMessage(UINT uMsg,
@@ -1476,19 +1450,12 @@ LRESULT WeaselPanel::OnDpiChanged(UINT uMsg,
 }
 
 LRESULT WeaselPanel::OnAvoidCandidate(UINT, WPARAM, LPARAM, BOOL&) {
-  if (!IsWindowVisible() || !m_layout ||
-      !m_layout->ShouldDisplayStatusIcon()) return 0;
-  RECT rect;
-  if (::GetWindowRect(m_hWnd, &rect) && AvoidCandidates(m_hWnd, rect)) {
-    ::SetWindowPos(m_hWnd, HWND_TOPMOST, rect.left, rect.top, 0, 0,
-                   SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
-    RedrawWindow();
-  }
+  if (IsWindowVisible() && _IsModeTip()) _RepositionModeTip();
   return 0;
 }
 
 LRESULT WeaselPanel::OnPanelShow(UINT, WPARAM shown, LPARAM, BOOL& handled) {
-  if (shown && GetPropW(m_hWnd, kPanelRole) == reinterpret_cast<HANDLE>(1))
+  if (GetPropW(m_hWnd, kPanelRole) == reinterpret_cast<HANDLE>(1))
     EnumWindows(NotifyModeTip, 0);
   else if (shown && GetPropW(m_hWnd, kPanelRole) == reinterpret_cast<HANDLE>(2))
     PostMessage(kAvoidCandidateMessage, 0, 0);
@@ -1497,14 +1464,21 @@ LRESULT WeaselPanel::OnPanelShow(UINT, WPARAM shown, LPARAM, BOOL& handled) {
 }
 
 void WeaselPanel::MoveTo(RECT const& rc) {
+  const bool same_caret = EqualRect(&m_caret, &rc);
+  m_caret = rc;
   if (!m_layout)
     return;  // avoid handling nullptr in _RepositionWindow
-  // A CN/EN tip is anchored directly to the text caret. It is not a candidate
-  // panel, so skip the normal six-pixel candidate gap and sticky placement.
+  if (_IsModeTip()) {
+    if (!same_caret || !IsWindowVisible()) _RepositionWindow(true);
+    return;
+  }
   if (m_layout->ShouldDisplayStatusIcon()) {
     m_sticky = false;
     m_istorepos = false;
-    _MoveModeTipTo(rc);
+    if (!EqualRect(&m_inputPos, &rc) || !IsWindowVisible()) {
+      m_inputPos = rc;
+      _RepositionWindow(true);
+    }
     return;
   }
   m_redraw_by_monitor_change = false;
@@ -1567,6 +1541,11 @@ void WeaselPanel::MoveTo(RECT const& rc) {
 }
 
 void WeaselPanel::_RepositionWindow(const bool& adj) {
+  if (_IsModeTip()) {
+    SetPropW(m_hWnd, kPanelRole, reinterpret_cast<HANDLE>(2));
+    _RepositionModeTip();
+    return;
+  }
   // Never place the window while the caret anchor is still the default CRect().
   // OnCreate() calls Refresh(), which calls this before any caret position has
   // been supplied, so the lookup below resolved x=0/y=0 and moved the freshly
@@ -1578,9 +1557,8 @@ void WeaselPanel::_RepositionWindow(const bool& adj) {
   if (m_inputPos.left == 0 && m_inputPos.top == 0 && m_inputPos.right == 0 &&
       m_inputPos.bottom == 0)
     return;
-  if (SsfActive())
-    SetPropW(m_hWnd, kPanelRole, reinterpret_cast<HANDLE>(
-        m_layout->ShouldDisplayStatusIcon() ? 2 : (!m_ctx.empty() ? 1 : 0)));
+  if (!m_ctx.empty())
+    SetPropW(m_hWnd, kPanelRole, reinterpret_cast<HANDLE>(1));
   else
     RemovePropW(m_hWnd, kPanelRole);
   RECT rcWorkArea;
@@ -2145,18 +2123,23 @@ bool WeaselPanel::_SsfDoPaint(CDCHandle dc) {
     return false;
   }
 
-  // The stock status-icon path first converts PNG artwork into an HICON.  The
-  // HICON mask is twice as wide as its colour bitmap, so some GDI paths paint
-  // Color-P's 25x25 PNG as a horizontally stretched red block.  Send the
-  // original RGBA pixels directly to the layered window instead: dimensions
-  // and transparent edges stay exactly as authored by the skin.
   if (m_layout->ShouldDisplayStatusIcon()) {
     const auto tip = ssf_renderer_.images().Get(
         m_status.ascii_mode ? "a2.png" : "cn2.png");
-    if (!tip || !tip->Valid()) return false;
+    const bool has_skin_tip = tip && tip->Valid();
+    const int w = has_skin_tip ? tip->Width() : 25;
+    const int h = has_skin_tip ? tip->Height() : 25;
+    CIcon modeTip;
+    if (_LoadModeTipIcon(modeTip, w, h)) {
+      if (!ssf_dib_.Ensure(w, h)) return false;
+      std::memset(ssf_dib_.bits, 0, static_cast<size_t>(w) * h * 4);
+      if (!::DrawIconEx(ssf_dib_.dc, 0, 0, modeTip, w, h, 0, nullptr, DI_NORMAL)) return false;
+      ::GdiFlush();
+      return _LayerUpdate(CRect(0, 0, w, h), ssf_dib_.dc);
+    }
 
-    const int w = tip->Width();
-    const int h = tip->Height();
+    // A skin PNG must keep its original alpha and extent when no branded icon is available.
+    if (!has_skin_tip) return false;
     HDC screenDC = ::GetDC(NULL);
     if (screenDC == NULL) return false;
     HDC memDC = ::CreateCompatibleDC(screenDC);

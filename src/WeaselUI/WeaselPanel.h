@@ -87,6 +87,7 @@ class WeaselPanel
     return !(m_inputPos.left == 0 && m_inputPos.top == 0 &&
              m_inputPos.right == 0 && m_inputPos.bottom == 0);
   }
+  bool CanShowModeTip() const { return !_IsModeTip() || m_modeTipPlaced; }
   void Refresh();
   void DoPaint(CDCHandle dc);
   bool GetIsReposition() { return m_istorepos; }
@@ -111,7 +112,11 @@ class WeaselPanel
   void _CreateLayout();
   void _ResizeWindow();
   void _RepositionWindow(const bool& adj = false);
-  void _MoveModeTipTo(const RECT& rc);
+  bool _IsModeTip() const {
+    return m_ctx.empty() && m_status.show_mode_tip && !m_status.disabled;
+  }
+  void _RepositionModeTip();
+  bool _LoadModeTipIcon(CIcon& icon, int width, int height) const;
   bool _DrawPreedit(const Text& text, CDCHandle dc, const CRect& rc);
   bool _DrawPreeditBack(const Text& text, CDCHandle dc, const CRect& rc);
   bool _DrawCandidates(CDCHandle& dc, bool back = false);
@@ -197,6 +202,8 @@ class WeaselPanel
   const bool& m_in_server;
 
   CRect m_inputPos;
+  CRect m_caret;
+  bool m_modeTipPlaced = false;
   RECT m_lastCandidateRect = {};
   int m_offsetys[MAX_CANDIDATES_COUNT];  // offset y for candidates when
                                          // vertical layout over bottom

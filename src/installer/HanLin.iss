@@ -1,5 +1,5 @@
 ﻿#define MyAppName "寒淋输入法"
-#define MyAppVersion "0.2.3"
+#define MyAppVersion "1.0.0"
 #define MyAppVersionQuad MyAppVersion + ".0"
 #define MyAppPublisher "TangSong777"
 #define MyAppURL "https://github.com/TangSong777/HanLin-IME"
@@ -25,6 +25,7 @@ DisableProgramGroupPage=yes
 LicenseFile=payload\LICENSE.txt
 OutputDir=output
 OutputBaseFilename=HanLin-Setup-{#MyAppVersion}
+SetupIconFile=..\HanLin\icons\hanlin.ico
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64os
@@ -46,6 +47,7 @@ Name: "skin"; Description: "安装现有 Color-P 候选皮肤"; GroupDescription
 [Files]
 Source: "{#PayloadDir}\HanLinHost.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\rime.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\tools\*"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "{#PayloadDir}\Migrate-HanLinUserData.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\x64\HanLinTip.dll"; DestDir: "{app}\x64"; Flags: ignoreversion regserver 64bit
 Source: "{#PayloadDir}\x86\HanLinTip.dll"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit
@@ -60,6 +62,7 @@ Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType
 
 [Icons]
 Name: "{group}\启动寒淋输入法"; Filename: "{app}\HanLinHost.exe"
+Name: "{group}\自定义词条"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\tools\WordManager.vbs"""; IconFilename: "{app}\tools\hanlin.ico"
 Name: "{group}\卸载寒淋输入法"; Filename: "{uninstallexe}"
 
 [Run]

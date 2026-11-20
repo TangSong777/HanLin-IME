@@ -1,0 +1,5 @@
+#pragma once
+
+#define IDI_HANLIN_APP 100
+#define IDI_HANLIN_MODE_CHINESE 170
+#define IDI_HANLIN_MODE_ENGLISH 171

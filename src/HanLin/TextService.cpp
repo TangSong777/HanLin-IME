@@ -409,12 +409,15 @@ class TextService final : public ITfTextInputProcessorEx,
           if (FAILED(written)) return written;
           State state;
           if (!SendInput(Command::Key, {key.symbol, key.modifiers}, state, cookie)) return S_OK;
-          return Accept(context, cookie, std::move(state), eaten);
+          const bool shift = key.symbol == XK_Shift_L || key.symbol == XK_Shift_R;
+          const bool mode_tip = shift && ascii_ != state.ascii && !state.composing;
+          return Accept(context, cookie, std::move(state), eaten, mode_tip);
         });
     return S_OK;
   }
 
-  HRESULT Accept(ITfContext* context, TfEditCookie cookie, State state, BOOL* eaten = nullptr) {
+  HRESULT Accept(ITfContext* context, TfEditCookie cookie, State state, BOOL* eaten = nullptr,
+                 bool mode_tip = false) {
     if (eaten) *eaten = state.handled;
     const bool committed = !state.commit.empty();
     if (committed) {
@@ -437,7 +440,7 @@ class TextService final : public ITfTextInputProcessorEx,
     composing_ = state.composing;
     UpdateMode(state.ascii);
     UpdateElements(context, state);
-    if (composition_ && context == context_.Get()) Place(context, cookie);
+    if ((composition_ || mode_tip) && context == context_.Get()) Place(context, cookie, mode_tip);
     return S_OK;
   }
 
@@ -516,8 +519,8 @@ class TextService final : public ITfTextInputProcessorEx,
     else RequestEdit(context_.Get(), client_, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, std::move(cancel));
   }
 
-  void Place(ITfContext* context, TfEditCookie cookie) {
-    if (!composition_ || !show_popup_ || (flags_ & TF_TMF_UIELEMENTENABLEDONLY)) {
+  void Place(ITfContext* context, TfEditCookie cookie, bool mode_tip = false) {
+    if ((!composition_ && !mode_tip) || !show_popup_ || (flags_ & TF_TMF_UIELEMENTENABLEDONLY)) {
       SendPlacement({});
       return;
     }

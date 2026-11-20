@@ -45,7 +45,7 @@ local function filter(input, env)
   local short_prefix = has_single_letter_first_syllable(env)
   for cand in input:iter() do
     local text = cand.text or ""
-    if short_prefix and leading_ascii_len(text) >= 2 then
+    if short_prefix and cand.type ~= "custom_english" and leading_ascii_len(text) >= 2 then
       -- 单字母音节接出来的英文词/造句，丢弃
     else
       yield(cand)

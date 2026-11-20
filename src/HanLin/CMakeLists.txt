@@ -11,6 +11,10 @@ set(HANLIN_VERSION "${CMAKE_MATCH_1}")
 string(REPLACE "." "," HANLIN_VERSION_NUMBERS "${HANLIN_VERSION}.0")
 configure_file(HanLinVersionDefs.h.in HanLinVersionDefs.h @ONLY)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
+set_property(SOURCE HanLinVersion.rc APPEND PROPERTY OBJECT_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/hanlin.ico"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/mode-chinese.ico"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/mode-english.ico")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

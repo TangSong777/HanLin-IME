@@ -82,6 +82,10 @@ void UIImpl::Hide() {
 void UIImpl::ShowWithTimeout(size_t millisec) {
   if (!panel.IsWindow())
     return;
+  if (!panel.CanShowModeTip()) {
+    Hide();
+    return;
+  }
   DLOG(INFO) << "ShowWithTimeout: " << millisec;
   // A queued callback can survive KillTimer. Check the latest deadline too.
   KillTimer(panel.m_hWnd, AUTOHIDE_TIMER);
