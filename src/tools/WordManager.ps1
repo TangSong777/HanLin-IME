@@ -292,8 +292,8 @@ function Show-StatsWindow {
         return
     }
     $daily = @{}
-    foreach ($line in (Get-Content $statsPath -Encoding UTF8)) {
-        $parts = $line -split "`t"
+    foreach ($statsLine in (Get-Content $statsPath -Encoding UTF8)) {
+        $parts = $statsLine -split "`t"
         if ($parts.Count -lt 2) { continue }
         $date = $parts[0].Trim()
         $n = 0
