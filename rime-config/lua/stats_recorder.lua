@@ -4,8 +4,8 @@
 --   - lua_processor@*stats_recorder
 -- 关闭方法：删掉那一行，或把 stats_enabled 设为 false。
 --
--- 记录文件：<userdir>/stats.log，每行 "YYYY-MM-DD\t字数"。
--- 只在提交候选时追加一行，不参与候选生成，对输入延迟影响可忽略。
+-- 记录文件：<userdir>/stats.log，每天一行 "YYYY-MM-DD\t字数"。
+-- 当天重复上屏会累加到最后一行，不会无限增长。
 
 local stats_recorder = {}
 
@@ -15,10 +15,32 @@ local function stats_path()
 end
 
 local function record(n)
-    local f = io.open(stats_path(), "a")
-    if not f then return end
-    f:write(os.date("%Y-%m-%d") .. "\t" .. n .. "\n")
-    f:close()
+    local path = stats_path()
+    local today = os.date("%Y-%m-%d")
+    local f = io.open(path, "r")
+    local content = ""
+    if f then
+        content = f:read("*a") or ""
+        f:close()
+    end
+    -- 去掉末尾换行，避免最后一行匹配到空串
+    local body = content:gsub("\n$", "")
+    local last_line = body:match("([^\n]+)$") or ""
+    local d, c = last_line:match("^(%d%d%d%d%-%d%d%-%d%d)\t(%d+)$")
+    if d == today then
+        local prefix = body:sub(1, #body - #last_line)
+        local w = io.open(path, "w")
+        if w then
+            w:write(prefix .. today .. "\t" .. (tonumber(c) + n) .. "\n")
+            w:close()
+        end
+    else
+        local a = io.open(path, "a")
+        if a then
+            a:write(today .. "\t" .. n .. "\n")
+            a:close()
+        end
+    end
 end
 
 function stats_recorder.func(key, env)
