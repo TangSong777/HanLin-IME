@@ -114,6 +114,7 @@ struct SsfImage {
   // Convert to premultiplied BGRA, the layout `UpdateLayeredWindow` expects
   // with AC_SRC_ALPHA. `out` receives width*height*4 bytes.
   void ToPremultipliedBGRA(std::vector<uint8_t>& out) const;
+  bool ToPremultipliedBGRA(uint8_t* out, size_t capacity) const;
 };
 
 using SsfImagePtr = std::shared_ptr<SsfImage>;

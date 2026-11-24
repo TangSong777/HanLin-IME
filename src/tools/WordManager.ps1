@@ -152,7 +152,7 @@ $header.SetRowSpan($badge, 2)
 $header.Controls.Add((New-WordLabel '自定义词条' $ink $headingFont), 1, 0)
 $header.Controls.Add((New-WordLabel $target.Phrase $muted $smallFont), 1, 1)
 
-$tools = New-WordLayout @(52, -100, 78, 78, 92) @(-100)
+$tools = New-WordLayout @(52, -100, 78, 78, 92, 92) @(-100)
 $layout.Controls.Add($tools, 0, 1)
 $tools.Controls.Add((New-WordLabel '查找' $muted $uiFont), 0, 0)
 $searchBox = New-WordTextBox '按词条或编码查找'
@@ -164,6 +164,8 @@ $reloadButton = New-WordButton '重新读取'
 $tools.Controls.Add($editButton, 2, 0)
 $tools.Controls.Add($deleteButton, 3, 0)
 $tools.Controls.Add($reloadButton, 4, 0)
+$statsButton = New-WordButton '打字统计'
+$tools.Controls.Add($statsButton, 5, 0)
 
 $tableFrame = New-Object Windows.Forms.Panel
 $tableFrame.Dock = 'Fill'
@@ -281,6 +283,104 @@ function Read-WordManagerGrid {
     Render-WordRows
 }
 
+function Show-StatsWindow {
+    $statsPath = Join-Path $target.Directory 'stats.log'
+    if (-not (Test-Path $statsPath)) {
+        [void][Windows.Forms.MessageBox]::Show(
+            "还没有统计数据。`n`n请先在 rime_ice.custom.yaml 的 engine/processors 里启用 stats_recorder（可选功能，默认关闭）。",
+            '寒淋输入法')
+        return
+    }
+    $daily = @{}
+    foreach ($line in (Get-Content $statsPath -Encoding UTF8)) {
+        $parts = $line -split "`t"
+        if ($parts.Count -lt 2) { continue }
+        $date = $parts[0].Trim()
+        $n = 0
+        if (-not [int]::TryParse($parts[1].Trim(), [ref]$n)) { continue }
+        if (-not $daily.ContainsKey($date)) { $daily[$date] = 0 }
+        $daily[$date] += $n
+    }
+    $today = Get-Date -Format 'yyyy-MM-dd'
+    $todayCount = if ($daily.ContainsKey($today)) { $daily[$today] } else { 0 }
+    $weekStart = (Get-Date).AddDays(-(([int](Get-Date).DayOfWeek + 6) % 7)).ToString('yyyy-MM-dd')
+    $weekCount = 0
+    foreach ($k in $daily.Keys) { if ($k -ge $weekStart) { $weekCount += $daily[$k] } }
+    $monthStart = (Get-Date -Format 'yyyy-MM') + '-01'
+    $monthCount = 0
+    foreach ($k in $daily.Keys) { if ($k -ge $monthStart) { $monthCount += $daily[$k] } }
+    $total = 0
+    foreach ($v in $daily.Values) { $total += $v }
+
+    $statsForm = New-Object Windows.Forms.Form
+    $statsForm.Text = '打字统计'
+    $statsForm.Size = [Drawing.Size]::new(520, 520)
+    $statsForm.StartPosition = 'CenterParent'
+    $statsForm.BackColor = $paper
+    $statsForm.Font = $uiFont
+
+    $statsLayout = New-WordLayout @(-100) @(70, 70, 70, 70, -100)
+    $statsLayout.Padding = [Windows.Forms.Padding]::new(18, 14, 18, 14)
+    $statsForm.Controls.Add($statsLayout)
+
+    $cards = @(
+        @('今日', $todayCount),
+        @('本周', $weekCount),
+        @('本月', $monthCount),
+        @('总计', $total)
+    )
+    for ($i = 0; $i -lt $cards.Count; ++$i) {
+        $card = New-Object Windows.Forms.Panel
+        $card.Dock = 'Fill'
+        $card.BackColor = $panel
+        $card.Margin = [Windows.Forms.Padding]::new(4)
+        $card.Padding = [Windows.Forms.Padding]::new(12, 8, 12, 8)
+        $cardLayout = New-WordLayout @(-100) @(-100, -100)
+        $card.Controls.Add($cardLayout)
+        $cardLayout.Controls.Add((New-WordLabel $cards[$i][0] $muted $smallFont), 0, 0)
+        $cardLayout.Controls.Add((New-WordLabel ([string]$cards[$i][1]) $accent $headingFont), 0, 1)
+        $statsLayout.Controls.Add($card, 0, $i)
+    }
+
+    $recent = New-Object Windows.Forms.DataGridView
+    $recent.Dock = 'Fill'
+    $recent.BackgroundColor = $panel
+    $recent.BorderStyle = 'None'
+    $recent.GridColor = $line
+    $recent.CellBorderStyle = 'SingleHorizontal'
+    $recent.ColumnHeadersBorderStyle = 'Single'
+    $recent.EnableHeadersVisualStyles = $false
+    $recent.ColumnHeadersHeight = 30
+    $recent.RowTemplate.Height = 26
+    $recent.RowHeadersVisible = $false
+    $recent.ReadOnly = $true
+    $recent.AllowUserToAddRows = $false
+    $recent.AllowUserToDeleteRows = $false
+    $recent.AllowUserToResizeRows = $false
+    $recent.MultiSelect = $false
+    $recent.SelectionMode = 'FullRowSelect'
+    $recent.AutoSizeColumnsMode = 'Fill'
+    $recent.ColumnHeadersDefaultCellStyle.BackColor = $selection
+    $recent.ColumnHeadersDefaultCellStyle.ForeColor = $ink
+    $recent.ColumnHeadersDefaultCellStyle.Font = $smallFont
+    $recent.DefaultCellStyle.BackColor = $panel
+    $recent.DefaultCellStyle.ForeColor = $ink
+    $recent.DefaultCellStyle.SelectionBackColor = $selection
+    $recent.DefaultCellStyle.SelectionForeColor = $ink
+    [void]$recent.Columns.Add('Date', '日期')
+    [void]$recent.Columns.Add('Count', '字数')
+    $recent.Columns['Date'].FillWeight = 60
+    $recent.Columns['Count'].FillWeight = 40
+    $statsLayout.Controls.Add($recent, 0, 4)
+
+    $sorted = $daily.Keys | Sort-Object -Descending | Select-Object -First 14
+    foreach ($d in $sorted) {
+        [void]$recent.Rows.Add($d, $daily[$d])
+    }
+
+    [void]$statsForm.ShowDialog($form)
+}
+
 function Start-WordEdit {
     $entry = Get-SelectedWord
     if (-not $entry -or $script:worker) { return }
@@ -301,6 +401,7 @@ $grid.Add_CellDoubleClick({ param($sender, $eventArgs) if ($eventArgs.RowIndex -
 $searchBox.Add_TextChanged({ Render-WordRows })
 $editButton.Add_Click({ Start-WordEdit })
 $cancelButton.Add_Click({ Reset-WordEditor })
+$statsButton.Add_Click({ Show-StatsWindow })
 $reloadButton.Add_Click({
     try {
         Reset-WordEditor

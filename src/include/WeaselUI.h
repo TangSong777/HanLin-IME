@@ -101,7 +101,7 @@ class UI {
 
 class DirectWriteResources {
  public:
-  DirectWriteResources(weasel::UIStyle& style, UINT dpi);
+  DirectWriteResources(weasel::UIStyle& style, UINT dpi, bool stock_formats = true);
   ~DirectWriteResources();
 
   HRESULT InitResources(const std::wstring& label_font_face,

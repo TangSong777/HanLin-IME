@@ -135,11 +135,11 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
     m_hMonitor = hMonitor;
   }
   dpi = dpiX;
-  _InitFontRes();
   // Preload the selected skin and the DirectWrite formats while the panel is
   // being created.  Waiting for the first composition used to make that first
   // candidate window pay for skin parsing and PNG decoding synchronously.
   _SsfReloadSkin();
+  _InitFontRes();
   if (SsfActive()) _SsfInitFonts();
   m_ostyle = m_style;
 }
@@ -152,11 +152,9 @@ WeaselPanel::~WeaselPanel() {
 }
 
 void WeaselPanel::_ResizeWindow() {
-  CDCHandle dc = GetDC();
   CSize m_size = m_layout->GetContentSize();
   SetWindowPos(NULL, 0, 0, m_size.cx, m_size.cy,
                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOREDRAW);
-  ReleaseDC(dc);
 }
 
 // SSF diagnostics.
@@ -333,6 +331,7 @@ void WeaselPanel::Refresh() {
                       static_cast<const void*>(&m_style));
       SSFLOG(buf);
     }
+    _SsfReloadSkin();
     _InitFontRes();
     {
       wchar_t buf[320];
@@ -340,9 +339,6 @@ void WeaselPanel::Refresh() {
                       m_style.ssf_skin.c_str());
       SSFLOG(buf);
     }
-    // Pick up a skin change before anything measures or paints. Cheap when the
-    // configured skin id is unchanged.
-    _SsfReloadSkin();
     if (SsfActive()) _SsfInitFonts();
     _CreateLayout();
 
@@ -374,11 +370,12 @@ void WeaselPanel::_InitFontRes(bool forced) {
   // resources
   if (forced || (pDWR == NULL) || (m_ostyle != m_style) || (dpiX != dpi)) {
     pDWR.reset();
-    pDWR = std::make_shared<DirectWriteResources>(m_style, dpiX);
+    // SSF measures and draws with its own formats, including its GDI fallback.
+    pDWR = std::make_shared<DirectWriteResources>(m_style, dpiX, !SsfActive());
     pDWR->pRenderTarget->SetTextAntialiasMode(
         (D2D1_TEXT_ANTIALIAS_MODE)m_style.antialias_mode);
+    m_ostyle = m_style;
   }
-  m_ostyle = m_style;
   dpi = dpiX;
   dpiScaleLayout = (float)dpi / 96.0f;
 }
@@ -1867,9 +1864,6 @@ void SsfSetCjkFont(IDWriteTextLayout* layout, const std::wstring& text,
 void WeaselPanel::_SsfInitFonts() {
   if (!SsfActive() || pDWR == NULL || pDWR->pDWFactory == NULL) return;
 
-  std::wstring ch = weasel::ssf::Utf8ToWide(ssf_skin_storage_.font_ch);
-  std::wstring en = weasel::ssf::Utf8ToWide(ssf_skin_storage_.font_en);
-
   // SSF's font_size is an authored pixel size, not a typographic point size.
   // Keep the art and glyphs proportional on a scaled monitor, then pass that
   // device-pixel value to the 96-DPI DirectWrite DC render target as DIPs.
@@ -1882,20 +1876,13 @@ void WeaselPanel::_SsfInitFonts() {
   // Rebuild the formats whenever the effective DPI changes.
   const int dpi_key = static_cast<int>(layout_scale * 96.0f + 0.5f);
 
-  // Try every face the skin names, then common CJK-capable fallbacks, so a
-  // machine without 汉仪细中圆简 still renders legible Chinese instead of boxes.
-  std::wstring list;
-  auto append = [&list](const std::wstring& face) {
-    if (face.empty()) return;
-    if (!list.empty()) list += L", ";
-    list += face;
-  };
-  append(ch);
-  append(en);
-  append(L"Microsoft YaHei");
-  append(L"Microsoft YaHei UI");
-  append(L"SimSun");
-  append(L"Segoe UI");
+  bool ready = true;
+  for (int i = 0; i < 4; ++i)
+    ready &= ssf_formats_[i] != nullptr && ssf_format_point_[i] == dpi_key;
+  if (ready) return;
+
+  const auto ch = weasel::ssf::Utf8ToWide(ssf_skin_storage_.font_ch);
+  const auto en = weasel::ssf::Utf8ToWide(ssf_skin_storage_.font_en);
 
   for (int i = 0; i < 4; ++i) {
     if (ssf_formats_[i] != nullptr && ssf_format_point_[i] == dpi_key) continue;
@@ -2139,50 +2126,11 @@ bool WeaselPanel::_SsfDoPaint(CDCHandle dc) {
     }
 
     // A skin PNG must keep its original alpha and extent when no branded icon is available.
-    if (!has_skin_tip) return false;
-    HDC screenDC = ::GetDC(NULL);
-    if (screenDC == NULL) return false;
-    HDC memDC = ::CreateCompatibleDC(screenDC);
-    if (memDC == NULL) {
-      ::ReleaseDC(NULL, screenDC);
-      return false;
-    }
-    BITMAPINFO bmi = {};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = w;
-    bmi.bmiHeader.biHeight = -h;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    void* bits = nullptr;
-    HBITMAP dib = ::CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, &bits,
-                                     nullptr, 0);
-    ::ReleaseDC(NULL, screenDC);
-    if (dib == nullptr || bits == nullptr) {
-      if (dib) ::DeleteObject(dib);
-      ::DeleteDC(memDC);
-      return false;
-    }
-    std::vector<uint8_t> bgra;
-    tip->ToPremultipliedBGRA(bgra);
+    if (!has_skin_tip || !ssf_dib_.Ensure(w, h)) return false;
     const size_t bytes = static_cast<size_t>(w) * h * 4;
-    if (bgra.size() < bytes) {
-      ::DeleteObject(dib);
-      ::DeleteDC(memDC);
+    if (!tip->ToPremultipliedBGRA(static_cast<uint8_t*>(ssf_dib_.bits), bytes))
       return false;
-    }
-    std::memcpy(bits, bgra.data(), bytes);
-    HGDIOBJ oldBmp = ::SelectObject(memDC, dib);
-    if (oldBmp == NULL || oldBmp == HGDI_ERROR) {
-      ::DeleteObject(dib);
-      ::DeleteDC(memDC);
-      return false;
-    }
-    const bool updated = _LayerUpdate(CRect(0, 0, w, h), memDC);
-    ::SelectObject(memDC, oldBmp);
-    ::DeleteObject(dib);
-    ::DeleteDC(memDC);
-    return updated;
+    return _LayerUpdate(CRect(0, 0, w, h), ssf_dib_.dc);
   }
 
   const weasel::ssf::SsfLayoutResult& layout = ssf_adapter_->layout();
@@ -2218,14 +2166,10 @@ bool WeaselPanel::_SsfDoPaint(CDCHandle dc) {
   HDC memDC = ssf_dib_.dc;
   void* bits = ssf_dib_.bits;
   const size_t expected = static_cast<size_t>(w) * h * 4;
-  result.surface->ToPremultipliedBGRA(ssf_upload_);
   auto restore_surface = [&]() {
-    if (ssf_upload_.size() >= expected)
-      std::memcpy(bits, ssf_upload_.data(), expected);
-    else
-      std::memset(bits, 0, expected);
+    return result.surface->ToPremultipliedBGRA(static_cast<uint8_t*>(bits), expected);
   };
-  restore_surface();
+  if (!restore_surface()) return false;
 
   // 3. Text, through DirectWrite so the glyphs come from the same font the
   //    layout measured.

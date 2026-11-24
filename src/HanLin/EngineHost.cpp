@@ -18,6 +18,8 @@ namespace {
 
 constexpr wchar_t kHostWindowClass[] = L"HanLinEngineHost";
 constexpr UINT kPresent = WM_APP + 1;
+constexpr UINT_PTR kSweepSessions = 1;
+constexpr UINT kSessionSweepInterval = 60000;
 constexpr char kSchema[] = "rime_ice";
 constexpr wchar_t kDataRevision[] = L"hanlin-data.revision";
 constexpr ULONGLONG kSessionIdleTime = 5 * 60 * 1000;
@@ -229,20 +231,19 @@ class EngineHost {
     });
   }
 
-  State Dispatch(const Request& request, DWORD process) {
-    if (request.command == Command::Open) return Open(request, process);
+  State& Dispatch(const Request& request, DWORD process, State& reply) {
+    if (request.command == Command::Open) return reply = Open(request, process);
     const auto it = sessions_.find(request.session);
-    if (it == sessions_.end() || it->second.process != process) return {};
+    if (it == sessions_.end() || it->second.process != process) return reply;
     auto& session = it->second;
     session.last_activity = GetTickCount64();
     const bool menu_action = request.command == Command::Select || request.command == Command::Highlight ||
         request.command == Command::Page || (request.command == Command::Clear && request.args[1]);
     if (menu_action && (active_ != request.session || !session.menu_revision ||
                         session.menu_revision != static_cast<uint32_t>(request.args[1]))) {
-      State ignored;
-      ignored.session = request.session;
-      ignored.has_caret = active_ == request.session && has_caret_;
-      return ignored;
+      reply.session = request.session;
+      reply.has_caret = active_ == request.session && has_caret_;
+      return reply;
     }
     const auto id = session.rime;
     bool handled = true;
@@ -250,17 +251,17 @@ class EngineHost {
     switch (request.command) {
       case Command::Close:
         RemoveSession(it);
-        return {};
+        return reply;
       case Command::Blur:
         if (active_ == request.session) Blur();
         session.menu_revision = 0;
-        return Snapshot(request.session, handled);
+        return reply = Snapshot(request.session, handled);
       case Command::Focus:
         SetActive(request.session);
         if (global_ascii_) api_->set_option(id, "ascii_mode", ascii_);
         break;
       case Command::Place:
-        return Place(request);
+        return reply = Place(request);
       case Command::Clear:
         api_->clear_composition(id);
         break;
@@ -288,20 +289,21 @@ class EngineHost {
         break;
       }
       case Command::Select:
-        if (request.args[0] < 0 || request.args[0] >= static_cast<int32_t>(kMaxCandidates)) return {};
+        if (request.args[0] < 0 || request.args[0] >= static_cast<int32_t>(kMaxCandidates)) return reply;
         handled = Select(id, request.args[0]);
         break;
       case Command::Highlight:
-        if (request.args[0] < 0 || request.args[0] >= static_cast<int32_t>(kMaxCandidates)) return {};
+        if (request.args[0] < 0 || request.args[0] >= static_cast<int32_t>(kMaxCandidates)) return reply;
         handled = api_->highlight_candidate_on_current_page(id, request.args[0]) != 0;
         break;
       case Command::Page:
         handled = api_->process_key(id, request.args[0] ? XK_Page_Up : XK_Page_Down, 0) != 0;
         break;
       default:
-        return {};
+        return reply;
     }
-    auto state = Snapshot(request.session, handled);
+    auto& state = active_ == request.session ? frame_ : reply;
+    state = Snapshot(request.session, handled);
     if (state.candidates.empty()) {
       session.menu_revision = 0;
     } else if (!session.menu_revision || request.command != Command::Highlight) {
@@ -312,8 +314,6 @@ class EngineHost {
     if (active_ == request.session) {
       mode_tip_pending_ = show_mode_tip && !state.composing;
       if (mode_tip_pending_) has_caret_ = state.has_caret = false;
-      frame_ = state;
-      frame_.commit.clear();
       frame_changed_ = true;
       SchedulePresent();
     }
@@ -325,13 +325,29 @@ class EngineHost {
     if (active_ && active_ == frame_.session) Present(frame_);
   }
 
+  void SweepSessions(HWND notify = nullptr, DWORD process = 0) {
+    const auto now = GetTickCount64();
+    for (auto it = sessions_.begin(); it != sessions_.end();) {
+      const auto& session = it->second;
+      DWORD owner = 0;
+      if (session.notify_window) GetWindowThreadProcessId(session.notify_window, &owner);
+      const bool abandoned = session.notify_window && owner != session.process;
+      const bool replaced = notify && session.notify_window == notify && session.process == process;
+      const bool idle = it->first != active_ && now - session.last_activity >= kSessionIdleTime;
+      if (abandoned || replaced || idle) it = RemoveSession(it);
+      else ++it;
+    }
+  }
+
  private:
   using Sessions = std::map<uint64_t, Session>;
 
   Sessions::iterator RemoveSession(Sessions::iterator it) {
     if (it->first == active_) Blur();
     api_->destroy_session(it->second.rime);
-    return sessions_.erase(it);
+    const auto next = sessions_.erase(it);
+    if (sessions_.empty()) KillTimer(window_, kSweepSessions);
+    return next;
   }
 
   State Open(const Request& request, DWORD process) {
@@ -344,17 +360,7 @@ class EngineHost {
       if (!GetWindowThreadProcessId(notify, &owner) || owner != process ||
           !GetClassNameW(notify, name, 64) || std::wstring_view(name) != kClientWindowClass) return {};
     }
-    const auto now = GetTickCount64();
-    for (auto it = sessions_.begin(); it != sessions_.end();) {
-      const auto& session = it->second;
-      DWORD owner = 0;
-      if (session.notify_window) GetWindowThreadProcessId(session.notify_window, &owner);
-      const bool abandoned = session.notify_window && owner != session.process;
-      const bool replaced = notify && session.notify_window == notify && session.process == process;
-      const bool idle = it->first != active_ && now - session.last_activity >= kSessionIdleTime;
-      if (abandoned || replaced || idle) it = RemoveSession(it);
-      else ++it;
-    }
+    SweepSessions(notify, process);
     if (sessions_.size() >= 512) return {};
     uint64_t token = 0;
     if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&token), sizeof(token), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0 ||
@@ -370,7 +376,8 @@ class EngineHost {
     }
     api_->set_option(id, "ascii_mode", global_ascii_ && ascii_);
     api_->set_option(id, "_inline_preedit", ui_.style().inline_preedit);
-    sessions_.emplace(token, Session{id, process, notify, now});
+    if (sessions_.empty()) SetTimer(window_, kSweepSessions, kSessionSweepInterval, nullptr);
+    sessions_.emplace(token, Session{id, process, notify, GetTickCount64()});
     if (!next_menu_revision_) next_menu_revision_ = static_cast<uint32_t>(token);
     return Snapshot(token, true);
   }
@@ -605,9 +612,12 @@ class EngineHost {
 
 LRESULT CALLBACK HostWindow(HWND window, UINT message, WPARAM word, LPARAM data) {
   if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
-  if (message == kPresent) {
+  if (message == kPresent || (message == WM_TIMER && word == kSweepSessions)) {
     const auto engine = reinterpret_cast<EngineHost*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (engine) engine->PresentPending();
+    if (engine) {
+      if (message == kPresent) engine->PresentPending();
+      else engine->SweepSessions();
+    }
     return 0;
   }
   return DefWindowProcW(window, message, word, data);
@@ -624,8 +634,8 @@ int RunWindow(HINSTANCE image, EngineHost& engine, const std::wstring& personal)
   if (!window) return 1;
   SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&engine));
   engine.AttachWindow(window, personal);
-  const auto result = RunTransport([&](const Request& request, DWORD process) {
-    return engine.Dispatch(request, process);
+  const auto result = RunTransport([&](const Request& request, DWORD process, State& reply) -> State& {
+    return engine.Dispatch(request, process, reply);
   });
   if (IsWindow(window)) DestroyWindow(window);
   return result;

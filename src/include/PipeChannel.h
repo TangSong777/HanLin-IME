@@ -15,10 +15,18 @@ class PipeChannelBase {
   struct ChannelContext {
     std::unique_ptr<char[]> buffer;
     std::unique_ptr<Stream> write_stream;
-    bool has_body;
+    HANDLE io_event = nullptr;
+    size_t payload_offset = 0;
+    size_t payload_bytes = 0;
+    bool has_body = false;
 
     ChannelContext(size_t bs)
-        : buffer(std::make_unique<char[]>(bs)), has_body(false) {}
+        : buffer(new char[bs + sizeof(wchar_t)]) {
+      buffer[0] = buffer[1] = 0;
+    }
+    ~ChannelContext() {
+      if (io_event) CloseHandle(io_event);
+    }
   };
 
   PipeChannelBase(std::wstring&& pn_cmd, size_t bs, SECURITY_ATTRIBUTES* s);
@@ -129,7 +137,9 @@ class PipeChannel : public PipeChannelBase {
       // another session, nor let a late response become the next key's reply.
       Disconnect();
       ClearBufferStream();
-      memset(_GetContext()->buffer.get(), 0, buff_size);
+      auto ctx = _GetContext();
+      ctx->payload_offset = ctx->payload_bytes = 0;
+      ctx->buffer[0] = ctx->buffer[1] = 0;
       throw;
     }
   }
@@ -142,11 +152,9 @@ class PipeChannel : public PipeChannelBase {
     }
   }
 
-  char* SendBuffer() const { return _GetContext()->buffer.get() + _MsgSize; }
-
-  char* ReceiveBuffer() const { return _GetContext()->buffer.get() + _ResSize; }
-  const wchar_t* ReceivePayload() const {
-    return reinterpret_cast<const wchar_t*>(_GetContext()->buffer.get());
+  wchar_t* ReceivePayload() const {
+    const auto ctx = _GetContext();
+    return reinterpret_cast<wchar_t*>(ctx->buffer.get() + ctx->payload_offset);
   }
 
   template <typename _TyHandler>
@@ -155,9 +163,9 @@ class PipeChannel : public PipeChannelBase {
       return false;
     }
 
-    // Use whole buffer to receive data in client
-    return handler((LPWSTR)_GetContext()->buffer.get(),
-                   (UINT)(buff_size * sizeof(char) / sizeof(wchar_t)));
+    const auto ctx = _GetContext();
+    return handler(ReceivePayload(),
+                   static_cast<UINT>(ctx->payload_bytes / sizeof(wchar_t)));
   }
 
  protected:
@@ -193,7 +201,6 @@ class PipeChannel : public PipeChannelBase {
     auto ctx = _GetContext();
     if (ctx->write_stream == nullptr) {
       char* pbuff = (char*)ctx->buffer.get() + _MsgSize;
-      memset(pbuff, 0, buff_size - _MsgSize);
       ctx->write_stream =
           std::make_unique<Stream>((wchar_t*)pbuff, _SendBufferSizeW());
     }
@@ -205,8 +212,5 @@ class PipeChannel : public PipeChannelBase {
     return (buff_size - _MsgSize) * sizeof(char) / sizeof(wchar_t);
   }
 
-  inline size_t _ReceiveBufferSizeW() const {
-    return (buff_size - _ResSize) * sizeof(char) / sizeof(wchar_t);
-  }
 };
 };  // namespace weasel

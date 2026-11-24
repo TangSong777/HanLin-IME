@@ -181,7 +181,6 @@ class WeaselPanel
     ~DibSurface() { Clear(); }
     bool Ensure(int w, int h);
   } ssf_dib_;
-  std::vector<uint8_t> ssf_upload_;
   std::wstring ssf_loaded_skin_id_;  // style.ssf_skin at load time
   std::wstring ssf_skin_dir_;
   weasel::ssf::SsfRenderer ssf_renderer_;

@@ -98,13 +98,27 @@
 
 ### 词条工具
 
-`src/tools/WordManager.vbs` 双击启动「自造词管理」窗口，可以：
+`src/tools/WordManager.lnk` 双击启动「自造词管理」窗口，可以：
 
 - 列出全部自定义词条（标准词 / 编码 / 权重）
 - 查找、添加、编辑、删除
 - 一键部署（后台调用 `HanLinHost.exe --deploy`，带备份与回滚）
 
 工具读取 `custom_phrase.txt`，部署时重新生成 `mixed_tokens.dict.yaml`。详细说明见 [添加英文单词](docs/ADD-WORDS.md)。
+
+### 打字统计（可选，默认关闭）
+
+词条工具右上角的「打字统计」按钮可以查看今日、本周、本月、总计打字数，以及最近 14 天的明细。
+
+这个功能**默认关闭**，因为它需要在每次上屏时追加一行记录。开启方法：
+
+1. 打开 `rime_ice.custom.yaml`，把 `stats_enabled: false` 改成 `true`
+2. 在 `engine/processors` 列表里加一行 `- lua_processor@*stats_recorder`
+3. 重新部署
+
+记录写入 `<用户目录>/stats.log`，每行 `YYYY-MM-DD	字数`。关闭时把上面两步反向操作即可，已有记录不会删除。
+
+性能影响：只在提交候选时追加一行文本（约 20 字节），不参与候选生成，对输入延迟的影响可以忽略。
 
 ### 数字与符号
 

@@ -210,7 +210,7 @@ DWORD ServerImpl::OnStartSession(WEASEL_IPC_COMMAND uMsg,
   if (!m_pRequestHandler)
     return 0;
   return m_pRequestHandler->AddSession(
-      reinterpret_cast<LPWSTR>(channel->ReceiveBuffer()),
+      channel->ReceivePayload(),
       [this](std::wstring& msg) -> bool {
         *channel << msg;
         return true;

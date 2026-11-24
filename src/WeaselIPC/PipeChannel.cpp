@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include <PipeChannel.h>
+#include <cstring>
 
 using namespace weasel;
 using namespace std;
@@ -84,11 +85,15 @@ bool PipeChannelBase::_Transfer(HANDLE pipe, void* data, DWORD size,
                                 DWORD& transferred, bool writing) {
   // Server workers own synchronous handles. Only clients run inside a host's
   // input thread and require cancelable, bounded waits.
-  const bool client = pipe == *_GetPipeHandle();
+  const auto client_pipe = hpipe_ptr.get();
+  const bool client = client_pipe && pipe == *client_pipe;
   OVERLAPPED operation = {};
   if (client) {
-    operation.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!operation.hEvent) return false;
+    const auto ctx = _GetContext();
+    if (!ctx->io_event) ctx->io_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!ctx->io_event) return false;
+    ResetEvent(ctx->io_event);
+    operation.hEvent = ctx->io_event;
   }
   BOOL ok = writing ? WriteFile(pipe, data, size, &transferred,
                                 client ? &operation : nullptr)
@@ -109,7 +114,6 @@ bool PipeChannelBase::_Transfer(HANDLE pipe, void* data, DWORD size,
       error = ERROR_TIMEOUT;
     }
   }
-  if (operation.hEvent) CloseHandle(operation.hEvent);
   SetLastError(error);
   return !!ok;
 }
@@ -132,24 +136,18 @@ void PipeChannelBase::_FinalizePipe(HANDLE& p) {
 }
 
 void PipeChannelBase::_Receive(HANDLE pipe, LPVOID msg, size_t rec_len) {
+  auto ctx = _GetContext();
   DWORD lread = 0;
-  BOOL success = _Transfer(pipe, msg, static_cast<DWORD>(rec_len), lread, false);
-  const DWORD header_bytes = lread;
-  if (!success) {
-    _ThrowIfNot(ERROR_MORE_DATA);
-
-    auto ctx = _GetContext();
-    memset(ctx->buffer.get(), 0, buff_size);
-    success = _Transfer(pipe, ctx->buffer.get(), static_cast<DWORD>(buff_size), lread, false);
-    if (!success) {
-      _ThrowLastError;
-    }
-  }
-  else {
-    memset(_GetContext()->buffer.get(), 0, buff_size);
-  }
-  if (header_bytes != rec_len) throw DWORD(ERROR_INVALID_DATA);
-  _GetContext()->has_body = false;
+  if (!_Transfer(pipe, ctx->buffer.get(), static_cast<DWORD>(buff_size), lread, false))
+    _ThrowLastError;
+  if (lread < rec_len || (lread - rec_len) % sizeof(wchar_t))
+    throw DWORD(ERROR_INVALID_DATA);
+  memcpy(msg, ctx->buffer.get(), rec_len);
+  ctx->payload_offset = rec_len;
+  ctx->payload_bytes = lread - rec_len;
+  // The buffer reserves one WCHAR for callers that consume a C string.
+  ctx->buffer[lread] = ctx->buffer[lread + 1] = 0;
+  ctx->has_body = false;
 }
 
 HANDLE PipeChannelBase::_ConnectServerPipe(std::wstring& pn) {

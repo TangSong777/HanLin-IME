@@ -1,4 +1,9 @@
 patch:
+  # 打字统计（可选功能，默认关闭）。开启方法：
+  #   1. 把下面的 false 改成 true
+  #   2. 在 engine/processors 里加一行 - lua_processor@*stats_recorder
+  #   3. 重新部署
+  stats_enabled: false
   # Process physical keypad literals before spelling and candidate selection.
   # The top keyboard row keeps its normal candidate-selection bindings.
   engine/processors:

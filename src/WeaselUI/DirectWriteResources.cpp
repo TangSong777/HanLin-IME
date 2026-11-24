@@ -15,7 +15,8 @@ vector<wstring> ws_split(const wstring& in, const wstring& delim) {
 }
 
 DirectWriteResources::DirectWriteResources(weasel::UIStyle& style,
-                                           UINT dpi = 96)
+                                           UINT dpi,
+                                           bool stock_formats)
     : _style(style),
       dpiScaleFontPoint(0),
       dpiScaleLayout(0),
@@ -54,7 +55,7 @@ DirectWriteResources::DirectWriteResources(weasel::UIStyle& style,
   dpiScaleFontPoint /= 72.0f;
   dpiScaleLayout /= 96.0f;
 
-  InitResources(style, dpi);
+  if (stock_formats) InitResources(style, dpi);
 }
 
 DirectWriteResources::~DirectWriteResources() {}

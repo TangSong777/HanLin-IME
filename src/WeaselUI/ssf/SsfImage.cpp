@@ -270,15 +270,20 @@ Rect SsfImage::CropTransparentBorders() {
 void SsfImage::ToPremultipliedBGRA(std::vector<uint8_t>& out) const {
   const size_t n = static_cast<size_t>((std::max)(0, width)) *
                    static_cast<size_t>((std::max)(0, height));
-  out.assign(n * 4, 0);
-  if (!Valid()) return;
+  out.resize(n * 4);
+  if (!ToPremultipliedBGRA(out.data(), out.size()))
+    std::fill(out.begin(), out.end(), 0);
+}
 
+bool SsfImage::ToPremultipliedBGRA(uint8_t* out, size_t capacity) const {
+  if (!out || !Valid()) return false;
+  const size_t n = static_cast<size_t>(width) * height;
+  if (capacity / 4 < n) return false;
   for (size_t i = 0; i < n; ++i) {
     const uint8_t r = pixels[i * 4 + 0];
     const uint8_t g = pixels[i * 4 + 1];
     const uint8_t b = pixels[i * 4 + 2];
     const uint8_t a = pixels[i * 4 + 3];
-    if (a == 0) continue;  // fully transparent; premultiplied form is all zero
     if (a == 255) {
       out[i * 4 + 0] = b;
       out[i * 4 + 1] = g;
@@ -291,6 +296,7 @@ void SsfImage::ToPremultipliedBGRA(std::vector<uint8_t>& out) const {
     out[i * 4 + 2] = static_cast<uint8_t>((static_cast<unsigned>(r) * a + 127u) / 255u);
     out[i * 4 + 3] = a;
   }
+  return true;
 }
 
 }  // namespace ssf

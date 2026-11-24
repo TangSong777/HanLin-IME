@@ -68,8 +68,9 @@ class Client {
   std::wstring endpoint_;
 };
 
-// Runs the host's message loop and serializes all engine access on its UI thread.
-int RunTransport(const std::function<State(const Request&, DWORD)>& dispatch);
+// The dispatcher may return its current frame or use the supplied reply.
+// RunTransport serializes it before processing any more window messages.
+int RunTransport(const std::function<State&(const Request&, DWORD, State&)>& dispatch);
 std::wstring UserSid();
 
 }  // namespace hanlin

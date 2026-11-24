@@ -600,7 +600,7 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
                                             LPWSTR buffer) {
   std::string app_name;
   // parse request text
-  wbufferstream bs(buffer, WEASEL_IPC_BUFFER_LENGTH);
+  wbufferstream bs(buffer, wcsnlen_s(buffer, WEASEL_IPC_BUFFER_LENGTH));
   std::wstring line;
   while (bs.good()) {
     std::getline(bs, line);

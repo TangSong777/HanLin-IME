@@ -11,6 +11,8 @@ namespace hanlin {
 namespace {
 
 constexpr size_t kMaxPacket = 64 * 1024;
+// Existing version-2 clients leave argument 5 zero and still get 32-bit lengths.
+constexpr int32_t kCompactLengths = 1;
 constexpr DWORD kReceiveTimeout = 200;
 constexpr DWORD kKeyTimeout = 125;
 constexpr DWORD kOpenTimeout = 1500;
@@ -45,11 +47,12 @@ struct ResponseHeader {
   uint32_t selection;
   uint32_t candidate_count;
   uint32_t menu_revision;
-  uint32_t reserved;
+  uint32_t encoding;
 };
 
 static_assert(sizeof(Request) == 40 && sizeof(ResponseHeader) == 40);
 static_assert(sizeof(wchar_t) == 2);
+static_assert(kMaxPacket / sizeof(wchar_t) <= UINT16_MAX);
 
 enum StateFlag : uint32_t {
   Handled = 1 << 0,
@@ -67,16 +70,20 @@ void Append(std::vector<uint8_t>& packet, const T& value) {
   packet.insert(packet.end(), bytes, bytes + sizeof(value));
 }
 
-bool AppendString(std::vector<uint8_t>& packet, const std::wstring& value) {
-  if (packet.size() + sizeof(uint32_t) + value.size() * sizeof(wchar_t) > kMaxPacket)
+bool AppendString(std::vector<uint8_t>& packet, const std::wstring& value,
+                  bool compact) {
+  const auto size = compact ? sizeof(uint16_t) : sizeof(uint32_t);
+  if (packet.size() + size > kMaxPacket ||
+      value.size() > (kMaxPacket - packet.size() - size) / sizeof(wchar_t))
     return false;
-  Append(packet, static_cast<uint32_t>(value.size()));
+  if (compact) Append(packet, static_cast<uint16_t>(value.size()));
+  else Append(packet, static_cast<uint32_t>(value.size()));
   const auto* bytes = reinterpret_cast<const uint8_t*>(value.data());
   packet.insert(packet.end(), bytes, bytes + value.size() * sizeof(wchar_t));
   return true;
 }
 
-bool WriteState(const State& state, std::vector<uint8_t>& packet) {
+bool WriteState(const State& state, std::vector<uint8_t>& packet, bool compact) {
   uint32_t flags = 0;
   if (state.handled) flags |= Handled;
   if (state.ascii) flags |= Ascii;
@@ -88,12 +95,14 @@ bool WriteState(const State& state, std::vector<uint8_t>& packet) {
   Append(packet, ResponseHeader{kProtocolVersion, flags, state.session, state.caret,
                                 state.page, state.selection,
                                 static_cast<uint32_t>(state.candidates.size()),
-                                state.menu_revision, 0});
-  if (!AppendString(packet, state.preedit) || !AppendString(packet, state.commit))
+                                state.menu_revision, compact ? kCompactLengths : 0u});
+  if (!AppendString(packet, state.preedit, compact) ||
+      !AppendString(packet, state.commit, compact))
     return false;
   for (const auto& candidate : state.candidates)
-    if (!AppendString(packet, candidate.text) || !AppendString(packet, candidate.comment) ||
-        !AppendString(packet, candidate.label))
+    if (!AppendString(packet, candidate.text, compact) ||
+        !AppendString(packet, candidate.comment, compact) ||
+        !AppendString(packet, candidate.label, compact))
       return false;
   return true;
 }
@@ -110,9 +119,16 @@ class PacketReader {
     return true;
   }
 
-  bool Read(std::wstring& value) {
+  bool Read(std::wstring& value, bool compact) {
     uint32_t length = 0;
-    if (!Read(length) || length > size_ / sizeof(wchar_t)) return false;
+    if (compact) {
+      uint16_t short_length = 0;
+      if (!Read(short_length)) return false;
+      length = short_length;
+    } else if (!Read(length)) {
+      return false;
+    }
+    if (length > size_ / sizeof(wchar_t)) return false;
     value.resize(length);
     auto count = length * sizeof(wchar_t);
     std::memcpy(value.data(), packet_, count);
@@ -133,8 +149,11 @@ bool ReadState(const uint8_t* packet, size_t size, State& result) {
   ResponseHeader header{};
   State state;
   if (!reader.Read(header) || header.version != kProtocolVersion ||
-      header.candidate_count > kMaxCandidates || !reader.Read(state.preedit) ||
-      !reader.Read(state.commit)) return false;
+      header.candidate_count > kMaxCandidates || header.encoding > kCompactLengths)
+    return false;
+  const bool compact = header.encoding == kCompactLengths;
+  if (!reader.Read(state.preedit, compact) || !reader.Read(state.commit, compact))
+    return false;
   state.session = header.session;
   state.handled = (header.flags & Handled) != 0;
   state.ascii = (header.flags & Ascii) != 0;
@@ -148,8 +167,9 @@ bool ReadState(const uint8_t* packet, size_t size, State& result) {
   state.menu_revision = header.menu_revision;
   state.candidates.resize(header.candidate_count);
   for (auto& candidate : state.candidates)
-    if (!reader.Read(candidate.text) || !reader.Read(candidate.comment) ||
-        !reader.Read(candidate.label))
+    if (!reader.Read(candidate.text, compact) ||
+        !reader.Read(candidate.comment, compact) ||
+        !reader.Read(candidate.label, compact))
       return false;
   if (!reader.Done()) return false;
   result = std::move(state);
@@ -225,6 +245,7 @@ bool Client::Call(const Request& request, State& result) const {
   OVERLAPPED operation{};
   operation.hEvent = event.get();
   auto outbound = request;
+  outbound.args[5] = kCompactLengths;
   std::array<uint8_t, kMaxPacket> response;
   DWORD size = 0;
   if (!TransactNamedPipe(pipe, &outbound, sizeof(outbound), response.data(),
@@ -239,7 +260,7 @@ bool Client::Call(const Request& request, State& result) const {
   return ReadState(response.data(), size, result);
 }
 
-int RunTransport(const std::function<State(const Request&, DWORD)>& dispatch) {
+int RunTransport(const std::function<State&(const Request&, DWORD, State&)>& dispatch) {
   const auto sid = UserSid();
   const auto endpoint = Endpoint(sid);
   if (endpoint.empty()) return 1;
@@ -280,7 +301,11 @@ int RunTransport(const std::function<State(const Request&, DWORD)>& dispatch) {
     ULONG process_id = 0;
     if (read && size == sizeof(request) && request.version == kProtocolVersion &&
         GetNamedPipeClientProcessId(pipe.get(), &process_id)) {
-      if (WriteState(dispatch(request, process_id), reply)) {
+      State response;
+      auto& state = dispatch(request, process_id, response);
+      const bool encoded = WriteState(state, reply, request.args[5] == kCompactLengths);
+      state.commit.clear();
+      if (encoded) {
         ResetEvent(event.get());
         const bool written = WriteFile(pipe.get(), reply.data(), static_cast<DWORD>(reply.size()), &size, &operation) ||
             (GetLastError() == ERROR_IO_PENDING && AwaitOnHost(pipe.get(), operation, size, kReceiveTimeout, stopped));

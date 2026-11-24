@@ -987,6 +987,13 @@ void TestPremultiply() {
   clear.ToPremultipliedBGRA(out2);
   CheckEq(out2[0], 0, "transparent pixel has zero blue");
   CheckEq(out2[3], 0, "transparent pixel has zero alpha");
+
+  uint8_t reused_dib[] = {255, 255, 255, 255, 42};
+  Check(!clear.ToPremultipliedBGRA(reused_dib, 3), "reject undersized DIB");
+  Check(clear.ToPremultipliedBGRA(reused_dib, 4), "write directly to DIB");
+  Check(reused_dib[0] == 0 && reused_dib[1] == 0 && reused_dib[2] == 0 &&
+            reused_dib[3] == 0 && reused_dib[4] == 42,
+        "clear transparent pixels without touching the next byte");
 }
 
 void TestNormalizeDefaults() {
