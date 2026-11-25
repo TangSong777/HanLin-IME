@@ -22,6 +22,8 @@ enum class Command : uint32_t {
   Clear,
   Blur,
   Focus,
+  OpenTrayMenu,
+  Health,
 };
 
 constexpr uint32_t kProtocolVersion = 2;
@@ -62,7 +64,8 @@ struct State {
 class Client {
  public:
   Client();
-  bool Call(const Request& request, State& result) const;
+  bool Call(const Request& request, State& result, bool wake_host = false) const;
+  void WakeIfMissing() const;
 
  private:
   std::wstring endpoint_;

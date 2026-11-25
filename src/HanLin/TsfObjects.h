@@ -97,9 +97,10 @@ class CandidateElement final : public SingleInterface<ITfCandidateListUIElementB
 
 class ModeButton final : public ITfLangBarItemButton, public ITfSource {
  public:
-  explicit ModeButton(std::function<void()> toggle) : toggle_(std::move(toggle)) {}
+  ModeButton(std::function<void()> toggle, std::function<bool(POINT)> menu)
+      : toggle_(std::move(toggle)), menu_(std::move(menu)) {}
   void Update(bool ascii);
-  void Detach() { toggle_ = {}; sink_.Reset(); }
+  void Detach() { toggle_ = {}; menu_ = {}; sink_.Reset(); }
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override;
   ULONG STDMETHODCALLTYPE AddRef() override { return lifetime_.Retain(); }
@@ -109,7 +110,7 @@ class ModeButton final : public ITfLangBarItemButton, public ITfSource {
   HRESULT STDMETHODCALLTYPE Show(BOOL show) override;
   HRESULT STDMETHODCALLTYPE GetTooltipString(BSTR* text) override;
   HRESULT STDMETHODCALLTYPE OnClick(TfLBIClick click, POINT, const RECT*) override;
-  HRESULT STDMETHODCALLTYPE InitMenu(ITfMenu*) override { return E_NOTIMPL; }
+  HRESULT STDMETHODCALLTYPE InitMenu(ITfMenu*) override;
   HRESULT STDMETHODCALLTYPE OnMenuSelect(UINT) override { return E_NOTIMPL; }
   HRESULT STDMETHODCALLTYPE GetIcon(HICON* icon) override;
   HRESULT STDMETHODCALLTYPE GetText(BSTR* text) override;
@@ -120,6 +121,7 @@ class ModeButton final : public ITfLangBarItemButton, public ITfSource {
   ComLifetime lifetime_;
   ComPtr<ITfLangBarItemSink> sink_;
   std::function<void()> toggle_;
+  std::function<bool(POINT)> menu_;
   bool shown_ = true;
   bool ascii_ = false;
 };

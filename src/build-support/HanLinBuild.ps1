@@ -24,12 +24,11 @@ function Get-HanLinContentFingerprint([string]$Root, [string[]]$Files) {
 function Get-HanLinSourceFingerprint([string]$SourceRoot) {
     $repo = Split-Path -Parent $SourceRoot
     $files = @(
-        Get-ChildItem -LiteralPath (Join-Path $SourceRoot HanLin),(Join-Path $SourceRoot include),
+        Get-ChildItem -LiteralPath (Join-Path $SourceRoot HanLin),(Join-Path $SourceRoot include),(Join-Path $SourceRoot WeaselUI),
             (Join-Path $repo 'reference\librime-reference\include') -File -Recurse | Select-Object -ExpandProperty FullName
         Join-Path $SourceRoot 'build-hanlin.ps1'
         Join-Path $SourceRoot 'build-support\Find-Toolchain.ps1'
         Join-Path $SourceRoot 'build-support\HanLinBuild.ps1'
-        Join-Path $SourceRoot 'WeaselTSF\HostCompatibility.h'
         Join-Path $SourceRoot 'installer\HanLin.iss'
         Join-Path $repo 'reference\librime-reference\src\rime_api.h'
     )
@@ -39,6 +38,8 @@ function Get-HanLinSourceFingerprint([string]$SourceRoot) {
 function Get-HanLinBuildArtifacts {
     [ordered]@{
         'HanLinHost.exe' = 'hanlin-tip-x64\HanLinHost.exe'
+        'HanLinTools.exe' = 'hanlin-tip-x64\HanLinTools.exe'
+        'HanLinTools.exe.config' = 'hanlin-tip-x64\HanLinTools.exe.config'
         'x64\HanLinTip.dll' = 'hanlin-tip-x64\HanLinTip.dll'
         'x86\HanLinTip.dll' = 'hanlin-tip-x86\HanLinTip.dll'
         'rime.dll' = 'hanlin-tip-x64\rime.dll'

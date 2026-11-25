@@ -1,5 +1,5 @@
 ﻿#define MyAppName "寒淋输入法"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppVersionQuad MyAppVersion + ".0"
 #define MyAppPublisher "TangSong777"
 #define MyAppURL "https://github.com/TangSong777/HanLin-IME"
@@ -46,14 +46,22 @@ Name: "skin"; Description: "安装现有 Color-P 候选皮肤"; GroupDescription
 
 [Files]
 Source: "{#PayloadDir}\HanLinHost.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\HanLinTools.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\HanLinTools.exe.config"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\rime.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#PayloadDir}\tools\*"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "{#PayloadDir}\Migrate-HanLinUserData.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\x64\HanLinTip.dll"; DestDir: "{app}\x64"; Flags: ignoreversion regserver 64bit
 Source: "{#PayloadDir}\x86\HanLinTip.dll"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit
 Source: "{#PayloadDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PayloadDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
 Source: "{#PayloadDir}\skin\*"; DestDir: "{commonappdata}\HanLin\Skin"; Flags: ignoreversion recursesubdirs; Tasks: skin
+
+[InstallDelete]
+Type: files; Name: "{app}\tools\WordManager.vbs"
+Type: files; Name: "{app}\tools\WordManager.ps1"
+Type: files; Name: "{app}\tools\WordManagerData.ps1"
+Type: files; Name: "{app}\tools\WordManagerDeployment.ps1"
+Type: files; Name: "{app}\tools\gen-mixed-tokens.ps1"
 
 [Registry]
 Root: HKLM64; Subkey: "SOFTWARE\HanLin"; ValueType: string; ValueName: "InstallRoot"; ValueData: "{app}"; Flags: uninsdeletevalue uninsdeletekeyifempty
@@ -62,17 +70,23 @@ Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType
 
 [Icons]
 Name: "{group}\启动寒淋输入法"; Filename: "{app}\HanLinHost.exe"
-Name: "{group}\自定义词条"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\tools\WordManager.vbs"""; IconFilename: "{app}\tools\hanlin.ico"
+Name: "{group}\自定义词条"; Filename: "{app}\HanLinTools.exe"; Parameters: "--words"
+Name: "{group}\打字统计"; Filename: "{app}\HanLinTools.exe"; Parameters: "--stats"
 Name: "{group}\卸载寒淋输入法"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\HanLinHost.exe"; Parameters: "--enable-profile"; Flags: runasoriginaluser runhidden waituntilterminated
-Filename: "{app}\HanLinHost.exe"; Flags: runasoriginaluser runhidden nowait
+Filename: "{app}\HanLinHost.exe"; Parameters: "--enable-profile"; Flags: runasoriginaluser runhidden waituntilterminated; Check: StartAfterSetup
+Filename: "{app}\HanLinHost.exe"; Flags: runasoriginaluser runhidden nowait; Check: StartAfterSetup
 
 [UninstallRun]
 Filename: "{app}\HanLinHost.exe"; Parameters: "--stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopHanLinHost"
 
 [Code]
+function StartAfterSetup: Boolean;
+begin
+  Result := ExpandConstant('{param:HANLINDEFERSTART|0}') <> '1';
+end;
+
 function DefaultInstallDir(Param: string): string;
 begin
   if not RegQueryStringValue(HKLM64, 'SOFTWARE\HanLin', 'InstallRoot', Result) or (Result = '') then
@@ -89,7 +103,7 @@ begin
   if FileExists(AddBackslash(AppDir) + 'WeaselServer.exe') or
      FileExists(AddBackslash(AppDir) + 'WeaselSetup.exe') then
   begin
-    Result := '请选择独立的寒淋安装目录。所选目录中已有小狼毫。';
+    Result := '所选目录中已有其他输入法。请选择独立的寒淋安装目录。';
     Exit;
   end;
   ExistingHost := AddBackslash(AppDir) + 'HanLinHost.exe';

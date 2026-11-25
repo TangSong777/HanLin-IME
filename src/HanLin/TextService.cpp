@@ -1,5 +1,5 @@
 #include "TsfObjects.h"
-#include "../WeaselTSF/HostCompatibility.h"
+#include "../include/InputHostCompatibility.h"
 
 #include <X11/keysym.h>
 
@@ -242,8 +242,9 @@ class TextService final : public ITfTextInputProcessorEx,
 
     CreateNotifyWindow();
     manager_.As(&bar_manager_);
-    if (bar_manager_ && !(flags & TF_TMF_UIELEMENTENABLEDONLY)) {
-      button_.Attach(new (std::nothrow) ModeButton([this] { SetMode(!ascii_); }));
+    if (bar_manager_) {
+      button_.Attach(new (std::nothrow) ModeButton(
+          [this] { SetMode(!ascii_); }, [this](POINT point) { return OpenTrayMenu(point); }));
       if (button_ && FAILED(bar_manager_->AddItem(button_.Get()))) button_.Reset();
     }
     ComPtr<ITfDocumentMgr> focused;
@@ -550,7 +551,7 @@ class TextService final : public ITfTextInputProcessorEx,
       caret.Attach(selected.range);
       BOOL clipped = FALSE;
       if (SUCCEEDED(view->GetTextExt(cookie, caret.Get(), &bounds, &clipped)) && !clipped &&
-          weasel_host::RectTouchesMonitor(bounds) && !weasel_host::PlaceholderExtent(bounds, view_bounds)) {
+          input_host::RectTouchesMonitor(bounds) && !input_host::PlaceholderExtent(bounds, view_bounds)) {
         SendPlacement(bounds);
         return;
       }
@@ -560,14 +561,14 @@ class TextService final : public ITfTextInputProcessorEx,
     const bool owns_foreground = foreground && (root ? root == GetAncestor(foreground, GA_ROOT) :
         GetWindowThreadProcessId(foreground, nullptr) == GetCurrentThreadId());
     if (owns_foreground) {
-      if (weasel_host::GetForegroundCaretRect(foreground, 20, bounds) &&
-          !weasel_host::PlaceholderExtent(bounds, view_bounds)) {
+      if (input_host::GetForegroundCaretRect(foreground, 20, bounds) &&
+          !input_host::PlaceholderExtent(bounds, view_bounds)) {
         SendPlacement(bounds);
         return;
       }
       if (view_bounds.right - view_bounds.left > 200 && view_bounds.bottom - view_bounds.top > 100) {
-        const auto anchor = weasel_host::FallbackAnchor(view_bounds);
-        if (weasel_host::RectTouchesMonitor(anchor)) {
+        const auto anchor = input_host::FallbackAnchor(view_bounds);
+        if (input_host::RectTouchesMonitor(anchor)) {
           SendPlacement(anchor);
           return;
         }
@@ -651,6 +652,7 @@ class TextService final : public ITfTextInputProcessorEx,
     if (TestContext(context)) {
       edit_cookie_ = Advise(context, IID_ITfTextEditSink, static_cast<ITfTextEditSink*>(this));
       layout_cookie_ = Advise(context, IID_ITfTextLayoutSink, static_cast<ITfTextLayoutSink*>(this));
+      if (!token_) transport_.WakeIfMissing();
       State state;
       if (Call(Command::Focus, {}, state) == CallResult::Success) UpdateMode(state.ascii);
     }
@@ -692,6 +694,14 @@ class TextService final : public ITfTextInputProcessorEx,
     changing_mode_ = false;
   }
 
+  bool OpenTrayMenu(POINT point) {
+    const uint64_t window = reinterpret_cast<uintptr_t>(notify_);
+    Request request{kProtocolVersion, Command::OpenTrayMenu, 0,
+        {point.x, point.y, static_cast<int32_t>(window), static_cast<int32_t>(window >> 32)}};
+    State reply;
+    return window && transport_.Call(request, reply, true) && reply.handled;
+  }
+
   bool EnsureSession() {
     if (token_) return true;
     if (GetTickCount64() < retry_after_) return false;
@@ -700,7 +710,7 @@ class TextService final : public ITfTextInputProcessorEx,
     request.args[0] = static_cast<int32_t>(window);
     request.args[1] = static_cast<int32_t>(window >> 32);
     State state;
-    if (!transport_.Call(request, state) || !state.session) {
+    if (!transport_.Call(request, state, true) || !state.session) {
       retry_after_ = GetTickCount64() + 400;
       return false;
     }
@@ -713,7 +723,8 @@ class TextService final : public ITfTextInputProcessorEx,
   CallResult Call(Command command, std::array<int32_t, 6> args, State& state) {
     if (!token_) return CallResult::Unavailable;
     Request request{kProtocolVersion, command, token_, args};
-    const bool replied = transport_.Call(request, state);
+    const bool replied = transport_.Call(request, state,
+        command == Command::Key || command == Command::SetAscii);
     if (replied && (state.session == token_ || command == Command::Close)) {
       if (!state.has_caret) last_placement_.reset();
       return CallResult::Success;

@@ -202,7 +202,7 @@ HRESULT ModeButton::GetInfo(TF_LANGBARITEMINFO* out) {
   *out = {};
   out->clsidService = kTip;
   out->guidItem = GUID_LBI_INPUTMODE;
-  out->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_SHOWNINTRAY;
+  out->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_MENU | TF_LBI_STYLE_SHOWNINTRAY;
   wcscpy_s(out->szDescription, kName);
   return S_OK;
 }
@@ -217,9 +217,19 @@ HRESULT ModeButton::Show(BOOL show) {
   return S_OK;
 }
 HRESULT ModeButton::GetTooltipString(BSTR* out) { return Bstr(ascii_ ? L"英文输入" : L"中文输入", out); }
-HRESULT ModeButton::OnClick(TfLBIClick click, POINT, const RECT*) {
+HRESULT ModeButton::OnClick(TfLBIClick click, POINT point, const RECT* area) {
   if (toggle_ && click == TF_LBI_CLK_LEFT) toggle_();
+  if (menu_ && click == TF_LBI_CLK_RIGHT) {
+    if (area && point.x == -1 && point.y == -1)
+      point = {area->left + (area->right - area->left) / 2, area->top};
+    return menu_(point) ? S_OK : E_FAIL;
+  }
   return S_OK;
+}
+HRESULT ModeButton::InitMenu(ITfMenu*) {
+  // The input indicator can request a menu instead of delivering a right-click.
+  POINT anchor{};
+  return menu_ && GetCursorPos(&anchor) && menu_(anchor) ? S_OK : E_FAIL;
 }
 HRESULT ModeButton::GetText(BSTR* out) { return Bstr(ascii_ ? L"英" : L"中", out); }
 HRESULT ModeButton::AdviseSink(REFIID iid, IUnknown* unknown, DWORD* cookie) {

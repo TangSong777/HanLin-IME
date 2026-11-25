@@ -1,0 +1,4 @@
+# 可在 patch 下覆盖 hanlin.yaml 的键。ssf_skin 留空时使用随包的 Color-P 皮肤。
+patch:
+  style/ssf_enabled: true
+  style/ssf_skin: ""

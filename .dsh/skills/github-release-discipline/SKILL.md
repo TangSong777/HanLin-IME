@@ -1,9 +1,9 @@
 ---
 name: github-release-discipline
-description: Use when maintaining the Color-P GitHub repository — committing, pushing, bumping a version, building the installer, tagging, publishing a release, writing release notes, or rolling one back. Enforces the snapshot-branch model ("commit is not release") and the exact release/rollback checklist.
+description: Use when maintaining a GitHub repository that follows the snapshot-branch model — committing, pushing, bumping a version, building the installer, tagging, publishing a release, writing release notes, or rolling one back. Enforces the snapshot-branch model ("commit is not release") and the exact release/rollback checklist.
 ---
 
-# 维护 Color-P 的 GitHub（仓库 + 发布）
+# GitHub 发布纪律（snapshot 分支模型）
 
 ## 分支模型
 
@@ -29,7 +29,7 @@ snapshot ──► master ──► tag + Release
 | 改版本号 / 打 tag / 发 Release / 重建安装包 | ❌ 仅在「更新版本」时 |
 
 - 日常改动（加词、修 bug、改文档、调参数）：**改本地 → 部署验证 → 记账 → 提交推送 snapshot**。
-- 项目始终只维护**一个稳定版本**（当前 `0.1.4`）。
+- 项目始终只维护**一个稳定版本**（当前 `1.0.0`）。
 - 用户只是提了个修改建议时，改完、验证完、记账、提交 snapshot、报告即可 —— **不要动 master，不要 bump 版本**。
 
 只有这几类指令才动 master / 版本 / Release：「更新版本」「发版」「回滚」。
@@ -69,7 +69,7 @@ snapshot ──► master ──► tag + Release
    - 两相对照，确保**没有一条改动被漏掉**（尤其是不在账本里的历史提交）
 2. **写日志**：按下面的模板补进 `CHANGELOG.md`，逐条核对账本条目都进了发布说明。
 3. **改版本号**（两处，必须一致）：
-   - `src/installer/Color-P.iss` → `MyAppVersion`、`MyAppVersionQuad`
+   - `src/installer/HanLin.iss` → `MyAppVersion`、`MyAppVersionQuad`
    - `src/installer/build-installer.ps1` → `$PackageVersion`
 4. **清空账本**：把 `PENDING-CHANGES.md` 复原成只有标题与使用说明，并更新「当前稳定版本」。
 5. **提交并推送 snapshot**：`git add -A` + commit（消息写「发布 x.y.z」）+ `git push`。
@@ -78,7 +78,7 @@ snapshot ──► master ──► tag + Release
 7. **合并 master**：`git checkout master` + `git merge --ff-only snapshot` + `git push`。
    合并失败说明 master 被污染，先停下来查原因，**不要**改用普通 merge 掩盖。
 8. **核对两分支一致**：`git rev-parse master` 必须等于 `git rev-parse snapshot`。
-9. **打标签**：在 `master` 上 `git tag -a <版本> -m "Color-P <版本>"` + `git push origin <版本>`。
+9. **打标签**：在 `master` 上 `git tag -a <版本> -m "HanLin-IME <版本>"` + `git push origin <版本>`。
 10. **发 Release**：exe + `SHA256SUMS.txt`，加 `--latest`。
 11. **切回 snapshot**：后续工作继续在 snapshot 上进行。
 12. **核验**：见「发布后必查」。
@@ -138,7 +138,7 @@ bump 版本与打包验证都在合并之前。若打包失败，snapshot 上最
 
 ## 回滚一个版本
 
-1. `gh release delete <版本> --repo TangSong777/Color-P --yes --cleanup-tag`
+1. `gh release delete <版本> --repo TangSong777/HanLin-IME --yes --cleanup-tag`
 2. `git tag -d <版本>`
 3. 版本号改回上一版（两处）
 4. 用**当前内容**重建上一版安装包
@@ -149,33 +149,60 @@ bump 版本与打包验证都在合并之前。若打包失败，snapshot 上最
    （回滚会让 master 后退，必须用 force；先确认远端 master 就是被回滚的那个提交）
 9. 在回复里提示：**上一版资产哈希已变**，已下载的人会对不上
 
-## 本项目的具体坐标
+## 项目坐标（按项目替换）
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `TangSong777/Color-P` |
+| 仓库 | `TangSong777/HanLin-IME` |
 | 工作分支 | `snapshot`（默认工作分支，日常提交推送） |
 | 稳定分支 | `master`（只做 fast-forward 合并，默认分支） |
 | 本地仓库 | `D:\Rime`（同时是小狼毫安装目录） |
 | 实时配置 | `D:\RimeUser` |
-| 安装器 | `src\installer\Color-P.iss` + `build-installer.ps1` |
-| 产物 | `src\installer\output\Color-P-Setup-<版本>.exe` |
+| 安装器 | `src\installer\HanLin.iss` + `build-installer.ps1` |
+| 产物 | `src\installer\output\HanLin-Setup-<版本>.exe` |
 | 词表文档 | `docs/CUSTOM-WORDS.md`（脚本生成） |
 | 版本日志 | `CHANGELOG.md` |
-| 二进制 | `src\dist\x64\WeaselServer.exe`、`weaselx64.dll`、`x86\weasel.dll` |
+| 二进制 | `src\output\HanLinHost.exe`、`weaselx64.dll`、`x86\weasel.dll` |
+
+### 如何适配新项目
+
+把上表换成目标项目的坐标即可，流程本身不变。需要确认的项：
+
+1. **仓库**：`<owner>/<repo>`
+2. **本地仓库路径**：`git rev-parse --show-toplevel`
+3. **稳定分支名**：`master` 或 `main`（本项目用 `master`，HanLin-ToDo 用 `main`）
+4. **版本号来源**：安装器脚本（`.iss` / `build-installer.ps1` / `package.json` / `Cargo.toml` / `.csproj`）—— 必须只有一处权威来源
+5. **产物名**：`<项目>-Setup-<版本>.exe` 或 `<项目>-<版本>.zip`
+6. **打包命令**：`build-installer.ps1` / `npm run build` / `cargo build --release` / `dotnet publish`
+7. **账本文件**：`PENDING-CHANGES.md`（没有就新建）
+8. **版本日志**：`CHANGELOG.md`（没有就新建）
+
+**HanLin-ToDo 的坐标**（示例）：
+
+| 项 | 值 |
+|---|---|
+| 仓库 | `TangSong777/HanLin-ToDo` |
+| 本地仓库 | `D:\WorkSpace\HanLin-ToDo` |
+| 工作分支 | `snapshot` |
+| 稳定分支 | `main`（不是 `master`） |
+| 版本号来源 | `src/HanLin.ToDo/HanLin.ToDo.csproj` 的 `<Version>`（当前没有，需加） |
+| 产物 | `HanLin-ToDo-<版本>.zip`（`dotnet publish` 输出） |
+| 打包命令 | `dotnet publish -c Release -r win-x64 --self-contained` |
+| 账本 | `PENDING-CHANGES.md`（需新建） |
+| 版本日志 | `CHANGELOG.md`（需新建） |
 
 常用命令：
 
 ```powershell
 # 打包（会从实时 RimeUser 重新暂存 payload）
-pwsh -File D:\Rime\src\installer\build-installer.ps1 -WeaselRoot D:\Rime\weasel-0.17.4
+pwsh -File D:\Rime\src\installer\build-installer.ps1
 
 # 发布
-gh release create <版本> <exe> SHA256SUMS.txt --repo TangSong777/Color-P `
-    --title "Color-P <版本>" --notes-file <notes.md> --latest
+gh release create <版本> <exe> SHA256SUMS.txt --repo TangSong777/HanLin-IME `
+    --title "HanLin-IME <版本>" --notes-file <notes.md> --latest
 
 # 替换资产
-gh release upload <版本> <exe> SHA256SUMS.txt --repo TangSong777/Color-P --clobber
+gh release upload <版本> <exe> SHA256SUMS.txt --repo TangSong777/HanLin-IME --clobber
 
 # 例行的 snapshot 提交
 git add -A && git commit -m "<一句话>" && git push
@@ -190,7 +217,7 @@ git checkout snapshot
 1. **`gh release edit --tag` 会压平历史**：它把新标签指向默认分支 HEAD，多个历史版本会指向同一提交。
    正确做法是用原始 SHA 修正：`git tag -f <新标签> <原SHA>` + `git push origin refs/tags/<新标签> --force`。
    重命名后必须核对 `git ls-remote --tags` 的 SHA 各不相同。
-2. **`gh` 需要仓库上下文**：不在仓库目录时必须带 `--repo TangSong777/Color-P`。
+2. **`gh` 需要仓库上下文**：不在仓库目录时必须带 `--repo TangSong777/HanLin-IME`。
 3. **不要「按行切分再重组」改 README**：文件混用 CRLF/LF，会整段吞掉内容。
    用精确的字符串替换或编辑工具。
 4. **`.NET` 相对路径按进程 CWD 解析**：`[IO.File]` 一律用绝对路径。

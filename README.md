@@ -78,6 +78,7 @@
 |---|---|
 | `HanLinTip.dll`（x64 / x86） | TSF 文本服务，注册到 Windows 输入法列表 |
 | `HanLinHost.exe` | 后台进程，加载 `rime.dll` 并维护引擎会话 |
+| `HanLinTools.exe` | 寒淋自绘托盘菜单、打字统计、设置与词库管理 |
 | `HanLinIPC` | 前端与后台之间的命名管道协议 |
 | `rime.dll` | librime 1.17.0（含动态数字识别与学词补丁） |
 
@@ -90,15 +91,17 @@
 | 位置 | 图标 |
 |---|---|
 | 系统输入法切换入口 | 「淋」字主图标（珊瑚红三点水 + 黑色「林」） |
-| 任务栏语言栏 | 同上，小尺寸加粗描边 |
+| 任务栏通知区 | 寒淋后台显示当前「中」/「英」状态，右击打开寒淋菜单 |
 | Shift 切换中英文 | 光标旁浮动「中」/「英」提示，3 秒后消失 |
 | 词条工具 | 同一份字形的小图标 |
 
 图标源文件在 `src/HanLin/icons/`，改字形后重跑生成脚本即可。
 
-### 词条工具
+### 托盘菜单与词条工具
 
-`src/tools/WordManager.lnk` 双击启动「自造词管理」窗口，可以：
+右击任务栏上寒淋的「中」或「英」状态按钮，可查看今日打字量，并打开历史统计、词库管理或设置。输入后台默认隐藏独立的托盘图标。后台退出后，寒淋前端会在输入框获得焦点、继续输入或打开菜单时尝试恢复。也可从开始菜单打开「自定义词条」，或运行 `HanLinTools.exe --words`。
+
+词库管理可以：
 
 - 列出全部自定义词条（标准词 / 编码 / 权重）
 - 查找、添加、编辑、删除
@@ -108,9 +111,9 @@
 
 ### 打字统计（可选，默认关闭）
 
-词条工具右上角的「打字统计」按钮可以查看今日、本周、本月、总计打字数，以及最近 14 天的明细。
+托盘菜单的「查看更多」可查看今日、本周、本月、总计打字数，以及最近 14 个自然日的明细。本周从星期一开始，记录从当前寒淋用户目录读取。
 
-这个功能**默认关闭**，因为它需要在每次上屏时追加一行记录。开启方法：
+记录功能**默认关闭**。开启方法：
 
 1. 打开 `rime_ice.custom.yaml`，把 `stats_enabled: false` 改成 `true`
 2. 在 `engine/processors` 列表里加一行 `- lua_processor@*stats_recorder`
@@ -271,7 +274,7 @@ HanLin-Setup-1.0.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 | 小键盘 `KP_Decimal` | 输出 ASCII `.` |
 | `cC` + 小键盘数字/运算符 | 计算器，结果作为候选 |
 | 英文白名单 | `CHAtgpt`、`cpu`、`vscode`。支持混合大小写前缀补全 |
-| 语言栏左键 / 右键 | 状态指示 / 打开菜单 |
+| 语言栏左键 / 右键 | 切换中英文 / 打开寒淋菜单 |
 
 大小写匹配只作用于自定义英文编码。大写字母仍可参与整句，例如 `zuogeDNAjiance` → 做个DNA检测。
 
@@ -323,7 +326,7 @@ nihaowoshiyanghanlin         →  Enter 或 Shift+Enter 都上屏 nihaowoshiyang
 
 | 文件 | 职责 |
 |---|---|
-| `weasel.custom.yaml` | 启用 SSF 后端、配色、布局、字体 |
+| `hanlin.custom.yaml` | 候选窗的皮肤、布局与字体，在 `patch` 下覆盖默认值 |
 | `default.custom.yaml` | 方案列表与全局快捷键 |
 | `rime_ice.custom.yaml` | 处理器/翻译器覆盖、按键绑定、英文分层、时间戳禁用、`speller/alphabet` |
 | `custom_phrase.txt` | 英文白名单与中文短码（`词条<Tab>编码`） |
@@ -375,9 +378,9 @@ chat → ChatGPT 出现在中文之后，但可以选到
 
 ### 迁移整套配置
 
-可以把小狼毫用户目录或其备份里的自定义配置、短语和学习词频迁入寒淋。之前导入小狼毫的搜狗短语随 `sogou_phrases.txt` 和对应的方案配置一起迁移。
+可以把已有 Rime 用户目录或其备份里的自定义配置、短语和学习词频迁入寒淋。
 
-先退出正在使用来源目录的小狼毫，再运行随寒淋安装的脚本。这里以 `D:\RimeUser` 为例。
+先退出正在使用来源目录的输入法，再运行随寒淋安装的脚本。这里以 `D:\RimeUser` 为例。
 
 ```powershell
 $install = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\HanLin' -Name InstallRoot).InstallRoot
@@ -385,7 +388,7 @@ Start-Process -FilePath (Join-Path $install 'HanLinHost.exe') -ArgumentList '--s
 pwsh -NoProfile -File (Join-Path $install 'Migrate-HanLinUserData.ps1') -Source 'D:\RimeUser'
 ```
 
-省略 `-Source` 时，脚本读取小狼毫设置中的用户目录。可用 `-Destination` 指定一个新目录，或加 `-NoActivate` 仅生成迁移副本。寒淋已有用户目录时，默认在旁边建立一个新目录。
+`-Source` 指向要迁入的用户目录。可用 `-Destination` 指定一个新目录，或加 `-NoActivate` 仅生成迁移副本。寒淋已有用户目录时，默认在旁边建立一个新目录。
 
 脚本保留本地配置、词表和用户词典的优先级，并生成新的部署缓存与安装标识。来源目录和原寒淋用户目录均可继续使用。脚本打印原寒淋用户目录。要切回时，先退出寒淋后端，再将 `HKCU:\Software\HanLin` 的 `UserDataDir` 改回该路径。
 
@@ -436,7 +439,7 @@ pwsh -NoProfile -File (Join-Path $install 'Migrate-HanLinUserData.ps1') -Source 
 
 **代码中不含任何键鼠钩子** —— 早期为「输入框外切换中英文」实现的全局钩子实测从未生效，已连同状态机一并移除。
 
-上游的 `src/WeaselTSF/` 仍保留在仓库中作参考，寒淋不再使用它。
+寒淋后台用 Windows 通知区接口维护「中」/「英」图标，状态或右键请求经寒淋的窗口消息转给桌面工具。工具进程读取统计和词表。候选渲染源码以 `hanlin_panel` 为目标，直接编入 `HanLinHost.exe`。
 
 ### 方案覆盖
 
@@ -473,28 +476,26 @@ rime-ice 默认把 `ts` 作为 Unix 时间戳触发码，而它同时是「唐�
 
 ### 构建与安装器
 
-- `weasel.props` 由脚本自动生成：`vswhere` 探测 Visual Studio，按目录名探测 MSVC 与 Windows SDK
-- 所有脚本经 `build-support/Find-Toolchain.ps1` 探测工具链，不写死本机路径
+- 构建脚本经 `build-support/Find-Toolchain.ps1` 定位 Visual Studio、MSVC、Windows SDK 和 Boost。
 - Inno Setup 安装寒淋自己的 x64 和 x86 文本服务、引擎进程与共享数据
 
 ## 构建与测试
 
 ### 构建
 
-使用 PowerShell 7、Visual Studio 2022、Windows SDK、Boost 1.82、CMake 和 Ninja。构建寒淋前端需要 x64 的 `WeaselUI.lib` 和寒淋定制的 librime 1.17.0 `rime.dll`。全新克隆请从同系列已安装的寒淋中取出定制 DLL，或用本项目引擎源码及 librime-lua 构建后通过 `-EngineDll` 提供。渲染库的编译依赖见 [构建渲染库](docs/build-weasel.md)。
+使用 PowerShell 7、Visual Studio 2022、Windows SDK、Boost 1.82、CMake 和 Ninja。桌面工具使用 Windows 上的 .NET Framework 4.8。全新克隆请从同系列已安装的寒淋中取出定制的 librime 1.17.0 DLL，或用本项目引擎源码及 librime-lua 构建后通过 `-EngineDll` 提供。
 
 ```powershell
 git clone https://github.com/TangSong777/HanLin-IME.git
 cd HanLin-IME
-pwsh -NoProfile -File .\src\build-weasel.ps1
 pwsh -NoProfile -File .\src\build-hanlin.ps1 -EngineDll 'C:\Program Files\HanLin\rime.dll'
 ```
 
-`-EngineDll` 指向已安装寒淋的 `rime.dll`（或 `src\dist\rime.dll`）。`-RendererLibrary` 默认取 `src\msbuild\Release\x64\WeaselUI.lib`，需要先跑 `build-weasel.ps1` 生成。
+`-EngineDll` 指向已安装寒淋的 `rime.dll`，默认使用 `src\dist\rime.dll`。同一条构建命令会产出 TSF、候选渲染、后台及桌面工具。
 
-寒淋产物位于 `src\output\hanlin-tip-x64` 和 `src\output\hanlin-tip-x86`。x64 目录也包含 `HanLinHost.exe` 与 `rime.dll`。`src\output\HanLinBuild.json` 记录前端源码指纹、版本和产物哈希。
+寒淋产物位于 `src\output\hanlin-tip-x64` 和 `src\output\hanlin-tip-x86`。x64 目录也包含 `HanLinHost.exe`、`HanLinTools.exe` 和 `rime.dll`。`src\output\HanLinBuild.json` 记录前端源码指纹、版本和产物哈希。
 
-`weasel.props` 由脚本自动生成。环境特殊时可用下列变量覆盖，并加 `-RegenerateProps` 重新生成：
+工具链可用下列变量覆盖：
 
 | 变量 | 含义 | 默认 |
 |---|---|---|
@@ -512,6 +513,8 @@ pwsh -File .\src\installer\build-installer.ps1 -SharedDataDir <Rime共享数据�
 ```
 
 打包程序先校验构建记录和白名单，再从共享数据与雾凇源目录预编译随包词库。编译时需退出寒淋后端。用 `-BuildRoot` 指定前端构建目录，用 `-OutputDir` 指定安装包输出目录。默认输出到 `src\installer\output`，文件名由版本号生成。
+
+本机部署可运行 `src/deploy-tsf.ps1`，通过安装器注册双架构文本服务。可用 `-UserDataDir` 指定现有用户目录。更换本机旧后台时可通过 `-LegacyServerPath` 精确指定它的可执行文件，脚本会关闭该实例，并在寒淋后台完成握手后切换当前用户的输入法入口。
 
 寒淋启动时用随包数据指纹检查个人编译缓存。数据变化时按当前用户配置重编缓存，成功后替换。重编失败时沿用旧缓存，下次启动重试。全新用户目录直接使用安装包中的预编译词库。
 
@@ -585,13 +588,12 @@ D:\Rime\                     # 仓库根
 ├── rime-config/             # 运行时配置与词条
 ├── docs/                    # 文档（CUSTOM-WORDS.md、ADD-WORDS.md 等）
 ├── reference/               # 第三方快照，仅作查阅
-├── weasel-0.17.4/           # 已安装的上游本体（不入库）
 ├── CHANGELOG.md             # 版本判定与发布记录
 ├── PENDING-CHANGES.md       # 待发布改动账本
 └── README.md
 ```
 
-`weasel-0.17.4/` 被 `.gitignore` 排除；`src/build-libs/` 的导入库约 0.3 MB/架构，随仓库提供以便直接编译。`reference/` 下为第三方项目快照，版权归各自作者。
+`reference/` 下为第三方项目快照，版权归各自作者。
 
 ## 扩展
 
@@ -630,8 +632,8 @@ import_tables:
 | 内容 | 位置 |
 |---|---|
 | 原始素材 | `assets/Color-P/` |
-| 启用与参数 | `weasel.custom.yaml` 的 `style/ssf_skin`、`ssf_enabled` |
-| 已部署副本 | `C:\ProgramData\ColorPWeasel\Color-P` |
+| 启用与参数 | `hanlin.custom.yaml` 的 `style/ssf_skin`、`style/ssf_enabled` |
+| 已部署副本 | `C:\ProgramData\HanLin\Skin` |
 
 改素材后重新部署即可，无需重编译。
 

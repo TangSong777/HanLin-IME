@@ -8,7 +8,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Source,
+    [Parameter(Mandatory)][string]$Source,
     [string]$Destination,
     [string]$HanLinHost = (Join-Path $PSScriptRoot 'HanLinHost.exe'),
     [switch]$NoActivate
@@ -18,10 +18,6 @@ $ErrorActionPreference = 'Stop'
 $registry = 'HKCU:\Software\HanLin'
 $previous = Get-ItemPropertyValue -LiteralPath $registry -Name UserDataDir -ErrorAction SilentlyContinue
 if (-not $previous) { $previous = Join-Path $env:APPDATA 'HanLin' }
-if (-not $Source) {
-    $Source = Get-ItemPropertyValue -LiteralPath 'HKCU:\Software\Rime\Weasel' -Name RimeUserDir -ErrorAction SilentlyContinue
-    if (-not $Source) { $Source = Join-Path $env:APPDATA 'Rime' }
-}
 $sourceDir = Get-Item -LiteralPath $Source
 if (-not $sourceDir.PSIsContainer -or ($sourceDir.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
     throw '请用 -Source 指定实际的 Rime 用户目录。'

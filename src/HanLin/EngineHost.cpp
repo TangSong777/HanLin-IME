@@ -1,4 +1,5 @@
 #include "TsfObjects.h"
+#include "TrayIcon.h"
 
 #include <WeaselUI.h>
 #include <rime_api.h>
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <string_view>
 
 namespace hanlin {
@@ -51,7 +53,8 @@ std::wstring RegistryPath(const wchar_t* key, const wchar_t* value) {
   if (RegGetValueW(HKEY_CURRENT_USER, key, value, RRF_RT_REG_SZ, nullptr, nullptr, &size)) return {};
   std::wstring text(size / sizeof(wchar_t), L'\0');
   if (RegGetValueW(HKEY_CURRENT_USER, key, value, RRF_RT_REG_SZ, nullptr, text.data(), &size)) return {};
-  if (!text.empty() && text.back() == L'\0') text.pop_back();
+  const auto terminator = text.find(L'\0');
+  if (terminator != std::wstring::npos) text.resize(terminator);
   return text;
 }
 
@@ -78,6 +81,11 @@ bool PrepareUserData(const std::filesystem::path& shared, const std::filesystem:
   error.clear();
   if (deploy || has_preset) fs::create_directories(personal, error);
   if (error || !fs::is_directory(personal, error)) return false;
+  const auto style = personal / L"hanlin.custom.yaml";
+  const auto previous_style = personal / L"weasel.custom.yaml";
+  if (!fs::exists(style, error) && !error && fs::exists(previous_style, error) && !error)
+    fs::copy_file(previous_style, style, fs::copy_options::skip_existing, error);
+  if (error) return false;
   if (has_preset)
     fs::copy(preset, personal, fs::copy_options::recursive | fs::copy_options::skip_existing, error);
   return !error;
@@ -134,7 +142,8 @@ int EnableUserProfile() {
 }
 
 int StopRunningHost() {
-  const auto window = FindWindowExW(HWND_MESSAGE, nullptr, kHostWindowClass, nullptr);
+  auto window = FindWindowW(kHostWindowClass, nullptr);
+  if (!window) window = FindWindowExW(HWND_MESSAGE, nullptr, kHostWindowClass, nullptr);
   if (!window) return 0;
   DWORD process_id = 0;
   GetWindowThreadProcessId(window, &process_id);
@@ -153,6 +162,19 @@ struct Session {
   ULONGLONG last_activity;
   uint32_t menu_revision = 0;
 };
+
+HWND ClientWindow(int32_t low, int32_t high) {
+  const auto id = static_cast<uint64_t>(static_cast<uint32_t>(low)) |
+      (static_cast<uint64_t>(static_cast<uint32_t>(high)) << 32);
+  return reinterpret_cast<HWND>(static_cast<uintptr_t>(id));
+}
+
+bool IsOwnedClientWindow(HWND window, DWORD process) {
+  wchar_t name[64]{};
+  DWORD owner = 0;
+  return GetWindowThreadProcessId(window, &owner) && owner == process &&
+      GetClassNameW(window, name, 64) && std::wstring_view(name) == kClientWindowClass;
+}
 
 class EngineHost {
  public:
@@ -209,10 +231,11 @@ class EngineHost {
     const char* id = api_->config_get_cstring(&schema, "schema/schema_id");
     const bool available = id && std::string_view(id) == kSchema;
     api_->config_close(&schema);
-    return available && api_->deploy_config_file("weasel.yaml", "config_version");
+    return available && api_->deploy_config_file("hanlin.yaml", "config_version");
   }
 
-  void AttachWindow(HWND window, const std::wstring& personal) {
+  void AttachWindow(HWND window, HINSTANCE image, const fs::path& directory,
+                    const std::wstring& shared, const std::wstring& personal, bool enable_tray) {
     window_ = window;
     ReadStyle(personal);
     ui_.InServer() = true;
@@ -229,9 +252,26 @@ class EngineHost {
       else if (highlight) post(Command::Highlight, *highlight);
       else if (backward || scroll) post(Command::Page, backward ? *backward : *scroll);
     });
+    tray_ = std::make_unique<TrayIcon>(window, image, directory, shared, personal, enable_tray);
   }
 
+  bool HandleTrayMessage(UINT message, WPARAM word, LPARAM data) {
+    return tray_ && tray_->Handle(message, word, data);
+  }
+
+  void CloseTray() { tray_.reset(); }
+
   State& Dispatch(const Request& request, DWORD process, State& reply) {
+    if (request.command == Command::Health) {
+      reply.handled = true;
+      return reply;
+    }
+    if (request.command == Command::OpenTrayMenu) {
+      const auto window = ClientWindow(request.args[2], request.args[3]);
+      reply.handled = tray_ && IsOwnedClientWindow(window, process) &&
+          tray_->RequestMenu({request.args[0], request.args[1]});
+      return reply;
+    }
     if (request.command == Command::Open) return reply = Open(request, process);
     const auto it = sessions_.find(request.session);
     if (it == sessions_.end() || it->second.process != process) return reply;
@@ -322,7 +362,10 @@ class EngineHost {
 
   void PresentPending() {
     present_scheduled_ = false;
-    if (active_ && active_ == frame_.session) Present(frame_);
+    if (active_ && active_ == frame_.session) {
+      if (tray_) tray_->UpdateMode(frame_.ascii);
+      Present(frame_);
+    }
   }
 
   void SweepSessions(HWND notify = nullptr, DWORD process = 0) {
@@ -351,15 +394,8 @@ class EngineHost {
   }
 
   State Open(const Request& request, DWORD process) {
-    const auto native_window = static_cast<uint64_t>(static_cast<uint32_t>(request.args[0])) |
-        (static_cast<uint64_t>(static_cast<uint32_t>(request.args[1])) << 32);
-    const auto notify = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_window));
-    if (notify) {
-      wchar_t name[64]{};
-      DWORD owner = 0;
-      if (!GetWindowThreadProcessId(notify, &owner) || owner != process ||
-          !GetClassNameW(notify, name, 64) || std::wstring_view(name) != kClientWindowClass) return {};
-    }
+    const auto notify = ClientWindow(request.args[0], request.args[1]);
+    if (notify && !IsOwnedClientWindow(notify, process)) return {};
     SweepSessions(notify, process);
     if (sessions_.size() >= 512) return {};
     uint64_t token = 0;
@@ -550,7 +586,7 @@ class EngineHost {
     style.hilited_candidate_back_color = static_cast<int>(0xfff1e3d7u);
     style.hilited_candidate_text_color = style.hilited_label_text_color = style.hilited_comment_text_color = style.text_color;
     RimeConfig config{};
-    if (!api_->config_open("weasel", &config)) return;
+    if (!api_->config_open("hanlin", &config) && !api_->config_open("weasel", &config)) return;
     auto get = [&](const char* key) { return Wide(api_->config_get_cstring(&config, key)); };
     auto flag = [&](const char* key, bool& value) {
       Bool configured = value;
@@ -564,8 +600,13 @@ class EngineHost {
     flag("style/horizontal", horizontal);
     if (!horizontal) style.layout_type = weasel::UIStyle::LAYOUT_VERTICAL;
     style.ssf_skin = get("style/ssf_skin");
+    const auto program_data = KnownDirectory(FOLDERID_ProgramData);
+    if (!program_data.empty()) {
+      const auto old_skin = program_data / L"ColorPWeasel" / L"Color-P";
+      if (_wcsicmp(fs::path(style.ssf_skin).lexically_normal().c_str(), old_skin.c_str()) == 0)
+        style.ssf_skin.clear();
+    }
     if (style.ssf_skin.empty() && style.ssf_enabled) {
-      const auto program_data = KnownDirectory(FOLDERID_ProgramData);
       if (!program_data.empty()) style.ssf_skin = (program_data / L"HanLin" / L"Skin").wstring();
     } else if (!style.ssf_skin.empty() && std::filesystem::path(style.ssf_skin).is_relative()) {
       style.ssf_skin = (std::filesystem::path(personal) / style.ssf_skin).wstring();
@@ -595,6 +636,7 @@ class EngineHost {
   bool setup_ = false;
   bool initialized_ = false;
   HWND window_ = nullptr;
+  std::unique_ptr<TrayIcon> tray_;
   weasel::UI ui_;
   Sessions sessions_;
   State frame_;
@@ -611,9 +653,14 @@ class EngineHost {
 };
 
 LRESULT CALLBACK HostWindow(HWND window, UINT message, WPARAM word, LPARAM data) {
-  if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
+  const auto engine = reinterpret_cast<EngineHost*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+  if (message == WM_DESTROY) {
+    if (engine) engine->CloseTray();
+    PostQuitMessage(0);
+    return 0;
+  }
+  if (engine && engine->HandleTrayMessage(message, word, data)) return 0;
   if (message == kPresent || (message == WM_TIMER && word == kSweepSessions)) {
-    const auto engine = reinterpret_cast<EngineHost*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (engine) {
       if (message == kPresent) engine->PresentPending();
       else engine->SweepSessions();
@@ -623,17 +670,18 @@ LRESULT CALLBACK HostWindow(HWND window, UINT message, WPARAM word, LPARAM data)
   return DefWindowProcW(window, message, word, data);
 }
 
-int RunWindow(HINSTANCE image, EngineHost& engine, const std::wstring& personal) {
+int RunWindow(HINSTANCE image, EngineHost& engine, const fs::path& directory,
+              const std::wstring& shared, const std::wstring& personal, bool enable_tray) {
   WNDCLASSW window_class{};
   window_class.lpfnWndProc = HostWindow;
   window_class.hInstance = image;
   window_class.lpszClassName = kHostWindowClass;
   RegisterClassW(&window_class);
-  const auto window = CreateWindowW(kHostWindowClass, kName, 0, 0, 0, 0, 0,
-                                    HWND_MESSAGE, nullptr, image, nullptr);
+  const auto window = CreateWindowExW(WS_EX_TOOLWINDOW, kHostWindowClass, kName, WS_POPUP,
+                                     0, 0, 0, 0, nullptr, nullptr, image, nullptr);
   if (!window) return 1;
   SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&engine));
-  engine.AttachWindow(window, personal);
+  engine.AttachWindow(window, image, directory, shared, personal, enable_tray);
   const auto result = RunTransport([&](const Request& request, DWORD process, State& reply) -> State& {
     return engine.Dispatch(request, process, reply);
   });
@@ -679,7 +727,7 @@ bool RefreshGeneratedCache(EngineHost& engine, const std::wstring& shared,
 }
 
 int RunEngine(HINSTANCE image, const fs::path& directory, const std::wstring& shared,
-              const std::wstring& personal, bool deploy) {
+              const std::wstring& personal, bool deploy, bool enable_tray) {
   if (!PrepareUserData(shared, personal, deploy)) return 1;
   const fs::path build = fs::path(personal) / L"build";
   const fs::path previous = fs::path(personal) / L".hanlin-build-previous";
@@ -688,14 +736,10 @@ int RunEngine(HINSTANCE image, const fs::path& directory, const std::wstring& sh
   EngineHost engine;
   if (!engine.Load(directory / L"rime.dll")) return 1;
   const auto revision = ReadDataRevision(fs::path(shared) / kDataRevision);
-  if (deploy && revision.empty()) {
-    engine.Initialize(shared, personal, true);
-    return engine.Deploy() ? 0 : 1;
-  }
-
   std::error_code error;
-  const bool refresh = !revision.empty() && fs::is_directory(build, error) &&
-      ReadDataRevision(build / kDataRevision) != revision;
+  const bool refresh = !revision.empty() &&
+      (!fs::is_directory(build, error) ||
+       ReadDataRevision(build / kDataRevision) != revision);
   if (deploy || refresh) {
     const bool updated = RefreshGeneratedCache(engine, shared, personal, revision, build, previous, deploy);
     if (!updated) {
@@ -706,7 +750,7 @@ int RunEngine(HINSTANCE image, const fs::path& directory, const std::wstring& sh
   }
 
   engine.Initialize(shared, personal, false);
-  return RunWindow(image, engine, personal);
+  return RunWindow(image, engine, directory, shared, personal, enable_tray);
 }
 
 int RunHost(HINSTANCE image) {
@@ -724,13 +768,21 @@ int RunHost(HINSTANCE image) {
     LocalFree(args);
     return EnableUserProfile();
   }
+  if (count == 2 && std::wstring_view(args[1]) == L"--health") {
+    LocalFree(args);
+    State state;
+    return Client().Call({kProtocolVersion, Command::Health, 0, {}}, state) && state.handled ? 0 : 1;
+  }
   bool stop = false;
   bool deploy = false;
+  bool enable_tray = false;
   bool valid = true;
   for (int i = 1; i < count; ++i) {
     const std::wstring_view key(args[i]);
     if (key == L"--stop") stop = true;
     else if (key == L"--deploy") deploy = true;
+    else if (key == L"--no-tray") enable_tray = false;
+    else if (key == L"--show-tray") enable_tray = true;
     else if (key == L"--shared-data" && i + 1 < count) shared = args[++i];
     else if (key == L"--user-data" && i + 1 < count) personal = args[++i];
     else valid = false;
@@ -748,7 +800,7 @@ int RunHost(HINSTANCE image) {
   if (!mutex) return 1;
   if (GetLastError() == ERROR_ALREADY_EXISTS) { CloseHandle(mutex); return deploy ? 3 : 0; }
   const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-  const auto result = RunEngine(image, directory, shared, personal, deploy);
+  const auto result = RunEngine(image, directory, shared, personal, deploy, enable_tray);
   if (SUCCEEDED(initialized)) CoUninitialize();
   CloseHandle(mutex);
   return result;

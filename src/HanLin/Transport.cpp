@@ -3,7 +3,9 @@
 #include <sddl.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <filesystem>
 #include <type_traits>
 #include <utility>
 
@@ -16,6 +18,8 @@ constexpr int32_t kCompactLengths = 1;
 constexpr DWORD kReceiveTimeout = 200;
 constexpr DWORD kKeyTimeout = 125;
 constexpr DWORD kOpenTimeout = 1500;
+constexpr DWORD kStartupWait = 180;
+constexpr ULONGLONG kLaunchCooldown = 1500;
 constexpr DWORD kClientAccess = FILE_GENERIC_READ | FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES;
 
 class Handle {
@@ -29,6 +33,43 @@ class Handle {
  private:
   HANDLE value_;
 };
+
+void StartInstalledHost() {
+  Handle maintenance(OpenEventW(SYNCHRONIZE, FALSE, L"Local\\HanLinMaintenance"));
+  if (maintenance.get() || GetLastError() == ERROR_ACCESS_DENIED) return;
+  static std::atomic<ULONGLONG> next_attempt{0};
+  const auto now = GetTickCount64();
+  auto next = next_attempt.load();
+  if (now < next || !next_attempt.compare_exchange_strong(next, now + kLaunchCooldown)) return;
+
+  HANDLE token = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return;
+  Handle token_handle(token);
+  TOKEN_ELEVATION elevation{};
+  DWORD size = 0;
+  if (!GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size) ||
+      elevation.TokenIsElevated) return;
+
+  constexpr DWORD flags = RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY;
+  constexpr wchar_t key[] = L"SOFTWARE\\HanLin";
+  constexpr wchar_t name[] = L"InstallRoot";
+  if (RegGetValueW(HKEY_LOCAL_MACHINE, key, name, flags, nullptr, nullptr, &size) != ERROR_SUCCESS) return;
+  std::wstring root(size / sizeof(wchar_t), L'\0');
+  if (RegGetValueW(HKEY_LOCAL_MACHINE, key, name, flags, nullptr, root.data(), &size) != ERROR_SUCCESS) return;
+  const auto terminator = root.find(L'\0');
+  if (terminator != std::wstring::npos) root.resize(terminator);
+  const std::filesystem::path directory(root);
+  if (!directory.is_absolute()) return;
+  const auto executable = directory / L"HanLinHost.exe";
+  std::wstring arguments = L"\"" + executable.wstring() + L"\"";
+  STARTUPINFOW startup{sizeof(startup)};
+  PROCESS_INFORMATION process{};
+  if (CreateProcessW(executable.c_str(), arguments.data(), nullptr, nullptr, FALSE,
+                     CREATE_NO_WINDOW, nullptr, directory.c_str(), &startup, &process)) {
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+  }
+}
 
 std::wstring Endpoint(const std::wstring& sid) {
   DWORD session = 0;
@@ -227,17 +268,37 @@ std::wstring UserSid() {
 
 Client::Client() : endpoint_(Endpoint(UserSid())) {}
 
-bool Client::Call(const Request& request, State& result) const {
+void Client::WakeIfMissing() const {
+  if (!endpoint_.empty() && !WaitNamedPipeW(endpoint_.c_str(), 1) &&
+      GetLastError() == ERROR_FILE_NOT_FOUND) StartInstalledHost();
+}
+
+bool Client::Call(const Request& request, State& result, bool wake_host) const {
   if (endpoint_.empty()) return false;
   const auto timeout = request.command == Command::Open ? kOpenTimeout : kKeyTimeout;
-  HANDLE pipe = CreateFileW(endpoint_.c_str(), kClientAccess, 0, nullptr, OPEN_EXISTING,
-                           FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+  const auto connect = [&] {
+    return CreateFileW(endpoint_.c_str(), kClientAccess, 0, nullptr, OPEN_EXISTING,
+                       FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+  };
+  HANDLE pipe = connect();
+  if (wake_host && pipe == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND) {
+    StartInstalledHost();
+    const auto deadline = GetTickCount64() + kStartupWait;
+    do {
+      Sleep(15);
+      pipe = connect();
+    } while (pipe == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND &&
+             GetTickCount64() < deadline);
+  }
   if (pipe == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PIPE_BUSY &&
       WaitNamedPipeW(endpoint_.c_str(), timeout))
-    pipe = CreateFileW(endpoint_.c_str(), kClientAccess, 0, nullptr, OPEN_EXISTING,
-                       FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+    pipe = connect();
   Handle pipe_guard(pipe);
   if (!pipe_guard.get()) return false;
+  if (request.command == Command::OpenTrayMenu) {
+    ULONG server = 0;
+    if (GetNamedPipeServerProcessId(pipe, &server)) AllowSetForegroundWindow(server);
+  }
   DWORD mode = PIPE_READMODE_MESSAGE;
   if (!SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr)) return false;
   Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));

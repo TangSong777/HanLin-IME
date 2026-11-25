@@ -115,6 +115,11 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
       pDWR(ui.pdwr()),
       _UICallback(ui.uiCallback()),
       _m_gdiplusToken(0) {
+#ifdef HANLIN_PANEL
+  m_iconDisabled.LoadIconW(IDI_HANLIN_APP, STATUS_ICON_SIZE, STATUS_ICON_SIZE, LR_DEFAULTCOLOR);
+  m_iconEnabled.LoadIconW(IDI_HANLIN_MODE_CHINESE, STATUS_ICON_SIZE, STATUS_ICON_SIZE, LR_DEFAULTCOLOR);
+  m_iconAlpha.LoadIconW(IDI_HANLIN_MODE_ENGLISH, STATUS_ICON_SIZE, STATUS_ICON_SIZE, LR_DEFAULTCOLOR);
+#else
   m_iconDisabled.LoadIconW(IDI_RELOAD, STATUS_ICON_SIZE, STATUS_ICON_SIZE,
                            LR_DEFAULTCOLOR);
   m_iconEnabled.LoadIconW(IDI_ZH, STATUS_ICON_SIZE, STATUS_ICON_SIZE,
@@ -125,6 +130,7 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
                        LR_DEFAULTCOLOR);
   m_iconHalf.LoadIconW(IDI_HALF_SHAPE, STATUS_ICON_SIZE, STATUS_ICON_SIZE,
                        LR_DEFAULTCOLOR);
+#endif
   // for gdi+ drawings, initialization
   GdiplusStartup(&_m_gdiplusToken, &_m_gdiplusStartupInput, NULL);
 
@@ -171,6 +177,16 @@ void WeaselPanel::_ResizeWindow() {
 // can be redirected without touching the build.
 namespace {
 
+#ifdef HANLIN_PANEL
+constexpr wchar_t kSsfLogging[] = L"HANLIN_SSF_LOGGING";
+constexpr wchar_t kSsfLogPath[] = L"HANLIN_SSF_LOG";
+constexpr wchar_t kSsfLogFile[] = L"hanlin-ssf.log";
+#else
+constexpr wchar_t kSsfLogging[] = L"WEASEL_SSF_LOGGING";
+constexpr wchar_t kSsfLogPath[] = L"WEASEL_SSF_LOG";
+constexpr wchar_t kSsfLogFile[] = L"weasel-ssf.log";
+#endif
+
 bool SsfLogEnabled() {
 #ifdef WEASEL_SSF_LOGGING_FORCE
   return true;
@@ -178,7 +194,7 @@ bool SsfLogEnabled() {
   static const bool enabled = [] {
     wchar_t buf[8] = {0};
     const DWORD n =
-        ::GetEnvironmentVariableW(L"WEASEL_SSF_LOGGING", buf, _countof(buf));
+        ::GetEnvironmentVariableW(kSsfLogging, buf, _countof(buf));
     return n > 0 && buf[0] != L'0';
   }();
   return enabled;
@@ -188,11 +204,11 @@ bool SsfLogEnabled() {
 std::wstring SsfLogPath() {
   wchar_t buf[MAX_PATH] = {0};
   const DWORD n =
-      ::GetEnvironmentVariableW(L"WEASEL_SSF_LOG", buf, _countof(buf));
+      ::GetEnvironmentVariableW(kSsfLogPath, buf, _countof(buf));
   if (n > 0 && buf[0]) return std::wstring(buf);
   wchar_t tmp[MAX_PATH] = {0};
-  if (::GetTempPathW(_countof(tmp), tmp) == 0) return L"weasel-ssf.log";
-  return std::wstring(tmp) + L"weasel-ssf.log";
+  if (::GetTempPathW(_countof(tmp), tmp) == 0) return kSsfLogFile;
+  return std::wstring(tmp) + kSsfLogFile;
 }
 
 void SsfLog(const std::wstring& msg) {
@@ -1299,6 +1315,12 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
 
     // status icon (I guess Metro IME stole my idea :)
     if (m_layout->ShouldDisplayStatusIcon()) {
+#ifdef HANLIN_PANEL
+      LoadIconNecessary(m_current_zhung_icon, m_style.current_zhung_icon, m_iconEnabled,
+                        IDI_HANLIN_MODE_CHINESE);
+      LoadIconNecessary(m_current_ascii_icon, m_style.current_ascii_icon, m_iconAlpha,
+                        IDI_HANLIN_MODE_ENGLISH);
+#else
       if (SsfActive()) {
         // These are Sogou's original hover-state mode glyphs.  Keep this
         // local to the candidate panel: Weasel's language bar accepts ICO
@@ -1320,6 +1342,7 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
         LoadIconNecessary(m_current_full_icon, m_style.current_full_icon,
                           m_iconFull, IDI_FULL_SHAPE);
       }
+#endif
       CRect iconRect(m_layout->GetStatusIconRect());
       if (m_istorepos && !m_ctx.aux.str.empty())
         iconRect.OffsetRect(0, m_offsety_aux);
@@ -1327,6 +1350,9 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
                !m_ctx.preedit.str.empty())
         iconRect.OffsetRect(0, m_offsety_preedit);
 
+#ifdef HANLIN_PANEL
+      CIcon& icon = m_status.disabled ? m_iconDisabled : (m_status.ascii_mode ? m_iconAlpha : m_iconEnabled);
+#else
       CIcon& icon = m_status.disabled
                         ? m_iconDisabled
                         : (SsfActive()
@@ -1339,6 +1365,7 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
                                              : (m_status.full_shape
                                                     ? m_iconFull
                                                     : m_iconHalf))));
+#endif
       CIcon modeTip;
       const bool branded = _LoadModeTipIcon(modeTip, iconRect.Width(), iconRect.Height());
       memDC.DrawIconEx(iconRect.left, iconRect.top, branded ? modeTip : icon,
@@ -1694,26 +1721,26 @@ inline D2D1_COLOR_F ToD2DColor(const weasel::ssf::Color& c) {
                       c.a / 255.0f);
 }
 
-// Resolve the Rime user data directory.
-//
-// WeaselUserDataPath() would do this, but it lives in RimeWithWeasel, which is
-// linked into WeaselServer.exe and not into weaselx64.dll. WeaselUI is compiled
-// into both, so the lookup is done locally instead of adding a link dependency
-// that would only exist for the sake of one path.
-//
-// Order: the RimeUserDir registry value, then %AppData%\Rime -- the same order
-// WeaselSetup uses when it writes that value.
+// Resolve relative skin paths using this product's user-data location.
 std::wstring ResolveUserDataDir() {
+#ifdef HANLIN_PANEL
+  constexpr auto key = L"Software\\HanLin";
+  constexpr auto value = L"UserDataDir";
+  constexpr auto fallback = L"%AppData%\\HanLin";
+#else
+  constexpr auto key = L"Software\\Rime\\Weasel";
+  constexpr auto value = L"RimeUserDir";
+  constexpr auto fallback = L"%AppData%\\Rime";
+#endif
   wchar_t buffer[MAX_PATH] = {0};
   DWORD buf_len = sizeof(buffer);
-  // Global inline helper from WeaselUtility.h (not in the weasel namespace).
-  if (::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Rime\\Weasel",
-                     L"RimeUserDir", RRF_RT_REG_SZ, nullptr, buffer,
+  if (::RegGetValueW(HKEY_CURRENT_USER, key,
+                     value, RRF_RT_REG_SZ, nullptr, buffer,
                      &buf_len) == ERROR_SUCCESS &&
       buffer[0]) {
     return std::wstring(buffer);
   }
-  if (::ExpandEnvironmentStringsW(L"%AppData%\\Rime", buffer,
+  if (::ExpandEnvironmentStringsW(fallback, buffer,
                                   _countof(buffer)) > 0 &&
       buffer[0]) {
     return std::wstring(buffer);

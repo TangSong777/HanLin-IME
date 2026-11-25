@@ -263,7 +263,7 @@ bool TestTransport() {
       Check(placement, "placement can clear and recover on the same session");
 }
 
-bool TestTextService(HMODULE library) {
+bool TestTextService(HMODULE library, bool tray, bool menu_request) {
   using namespace hanlin;
   using GetFactory = HRESULT(WINAPI*)(REFCLSID, REFIID, void**);
   const auto factory_entry = reinterpret_cast<GetFactory>(GetProcAddress(library, "DllGetClassObject"));
@@ -290,7 +290,32 @@ bool TestTextService(HMODULE library) {
 
   ComPtr<ITfThreadMgr> test_manager;
   test_manager.Attach(new ThreadManager(manager.Get()));
-  if (!CheckResult(service->ActivateEx(test_manager.Get(), client, TF_TMF_UIELEMENTENABLEDONLY), "activate test TIP")) return false;
+  if (!CheckResult(service->ActivateEx(test_manager.Get(), client,
+      tray && !menu_request ? 0 : TF_TMF_UIELEMENTENABLEDONLY), "activate test TIP")) return false;
+
+  if (tray) {
+    ComPtr<ITfLangBarItemMgr> bar;
+    ComPtr<ITfLangBarItem> item;
+    ComPtr<ITfLangBarItemButton> button;
+    TF_LANGBARITEMINFO info{};
+    RECT work{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    const bool opened =
+        CheckResult(manager.As(&bar), "language bar manager") &&
+        CheckResult(bar->GetItem(GUID_LBI_INPUTMODE, &item), "language bar mode item") &&
+        CheckResult(item->GetInfo(&info), "language bar mode identity") &&
+        IsEqualCLSID(info.clsidService, kTip) &&
+        (info.dwStyle & TF_LBI_STYLE_BTN_MENU) != 0 &&
+        CheckResult(item.As(&button), "language bar button") &&
+        (menu_request ? button->InitMenu(nullptr) :
+         button->OnClick(TF_LBI_CLK_RIGHT, {work.right - 30, work.bottom}, &work)) == S_OK;
+    service->Deactivate();
+    document->Pop(TF_POPF_ALL);
+    manager->Deactivate();
+    return Check(opened, menu_request ?
+        "HanLin TSF menu request reaches the desktop menu in a UI-element host" :
+        "HanLin TSF mode button right-click reaches the desktop menu");
+  }
 
   auto key = [&](UINT vk, bool shift = false, bool expect_eaten = true) {
     BYTE original[256]{};
@@ -359,15 +384,18 @@ bool TestTextService(HMODULE library) {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 2) {
-    std::fputs("Usage: HanLinFrontendRegression.exe <HanLinTip.dll>\n"
+  const std::wstring_view option = argc == 3 ? argv[2] : L"";
+  const bool menu_request = option == L"--tray-init";
+  const bool tray = option == L"--tray" || menu_request;
+  if (argc != 2 && !tray) {
+    std::fputs("Usage: HanLinFrontendRegression.exe <HanLinTip.dll> [--tray | --tray-init]\n"
                "Start HanLinHost with an isolated --user-data before running this probe.\n", stderr);
     return 2;
   }
   if (!CheckResult(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED), "COM apartment")) return 2;
   const auto library = LoadLibraryExW(argv[1], nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-  const bool transport = TestTransport();
-  const bool text = library && TestTextService(library);
+  const bool transport = tray || TestTransport();
+  const bool text = library && TestTextService(library, tray, menu_request);
   if (library) FreeLibrary(library);
   CoUninitialize();
   return transport && text ? 0 : 1;
