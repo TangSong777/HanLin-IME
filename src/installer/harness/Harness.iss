@@ -20,10 +20,10 @@
 #endif
 
 [Setup]
-AppName=Color-P Installer Harness
+AppName=SSF Installer Harness
 AppVersion=1.0
 DefaultDirName={#HarnessRoot}\work
-DefaultGroupName=Color-P Harness
+DefaultGroupName=SSF Harness
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 DisableFinishedPage=yes
@@ -32,7 +32,7 @@ DisableStartupPrompt=yes
 CreateAppDir=yes
 PrivilegesRequired=lowest
 OutputDir=output
-OutputBaseFilename=Color-P-Harness
+OutputBaseFilename=SSF-Harness
 Compression=none
 SolidCompression=no
 Uninstallable=no
@@ -119,7 +119,7 @@ begin
 end;
 
 // ============================================================================
-//  以下两个函数与主安装器 Color-P.iss 中的实现保持一致（逐字复制）
+//  以下两个函数与主安装器 SSF.iss 中的实现保持一致（逐字复制）
 //  必须在调用者之前定义：Inno 的 Pascal 不支持前置声明。
 // ============================================================================
 function SkinPathForYaml(): string;

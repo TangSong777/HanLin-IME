@@ -332,7 +332,7 @@ bool SsfLayoutAdapter::IsInlinePreedit() const {
 }
 
 bool SsfLayoutAdapter::ShouldDisplayStatusIcon() const {
-  // Keep Color-P candidate-only by default, but retain its Sogou CN/EN art for
+  // Keep SSF candidate-only by default, but retain its Sogou CN/EN art for
   // an actual ascii_mode notification. Ordinary empty refreshes (including
   // literal numpad digits) intentionally never create a standalone tip.
   return _context.empty() && _status.show_mode_tip;

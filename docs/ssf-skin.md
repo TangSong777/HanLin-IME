@@ -22,14 +22,14 @@ exactly as before.
    skin's images:
 
    ```
-   D:\RimeUser\Color-P\
+   D:\RimeUser\SSF\
        skin.ini
        skin1_2.png   skin2.png   skin2_1.png   skin2_2.png
        cn2.png   cn3.png   en2.png ... (status-bar art)
    ```
 
-   **This repository deploys Color-P outside the user directory**, at
-   `C:\ProgramData\ColorPWeasel\Color-P`, because `ProgramData` is readable by
+   **This repository deploys SSF outside the user directory**, at
+   an absolute path under ProgramData (a hosted skin directory), because ProgramData is readable by
    AppContainer hosts such as Windows Search. `rime-config/weasel.custom.yaml`
    therefore sets `style/ssf_skin` to that absolute path. The `D:\RimeUser\...`
    paths in the examples below are the generic case; substitute the deployed one.
@@ -38,7 +38,7 @@ exactly as before.
 
    ```yaml
    patch:
-     style/ssf_skin: "Color-P"      # relative to RimeUserDir, or absolute
+     style/ssf_skin: "<skin-dir>"   # relative to RimeUserDir, or absolute
      style/ssf_enabled: true
      style/ssf_status_bar: true     # draw the skin's status bar
    ```
@@ -125,7 +125,7 @@ Two design decisions are worth calling out:
 `skin.ini` writes colours as `0xRRGGBB` but the bytes are in **BGR** order.
 `ParseSogouColor()` therefore swaps them.
 
-This is not a guess for the Color-P skin: `zhongwen_color=0x6e6cff` decodes to
+This is not a guess for the SSF skin: `zhongwen_color=0x6e6cff` decodes to
 RGB **(255, 108, 110)**, and `skin2.png`'s pink pixels measure exactly
 `RGBA(255,108,110,230)`. `pinyin_color=0x3c3c3c` is grey and cannot
 self-verify, but the same rule applies.
@@ -135,7 +135,7 @@ self-verify, but the same rule applies.
 `s skin.ini` files in the wild are UTF-16LE (with BOM), UTF-8, or GBK.
 `DecodeIniText()` tries in this order:
 
-1. `FF FE` → **UTF-16LE** — *this is what the bundled Color-P skin uses*
+1. `FF FE` → **UTF-16LE** — *this is what the bundled SSF skin uses*
 2. `FE FF` → UTF-16BE
 3. `EF BB BF` → UTF-8 with BOM
 4. strict UTF-8 validation (with overlong / surrogate / range checks)
@@ -155,7 +155,7 @@ treats them as highlight images, and 9IME consequently cannot render a
 two-tone skin at all — 9IME's `pick_scheme()` prefers `pic` and therefore falls
 through to the `Scheme_H1` single background.
 
-Evidence, from the Color-P assets:
+Evidence, from the SSF assets:
 
 * `pinyin_pic = skin2_1.png` is 70×28 and is a **plain pink rounded bar** with
   no white fill — exactly a preedit strip.
@@ -184,7 +184,7 @@ skin provides them**.
 | **`anchor=a,b`** | **No public implementation or documentation found.** Both integers are parsed into `Scheme::anchor` and reported by `ssf_preview`, but the renderer **never reads them**. There is deliberately no `switch(anchor)` heuristic anywhere. |
 | `layout_horizontal[0]` / `layout_vertical[0]` (the leading `0`) | Stored as `NineSlice::mode_x` / `mode_y` and never used to switch behaviour. |
 | `use_gdip`, `aero`, `glow`, `LargeFontSupport` | Parsed into `Skin` for diagnostics only. Nothing depends on them. |
-| The `▽` / `≡` controls at the right of the candidate window | `skin.ini` has **no section describing them**, and none of the 27 PNGs in the Color-P skin match. They are almost certainly Sogou's own built-in UI rather than SSF resources. A placeholder hook exists (`LayoutOptions::trailing_controls_width`) but it is **off by default**, and nothing pretends this is SSF semantics. |
+| The `▽` / `≡` controls at the right of the candidate window | `skin.ini` has **no section describing them**, and none of the 27 PNGs in the SSF skin match. They are almost certainly Sogou's own built-in UI rather than SSF resources. A placeholder hook exists (`LayoutOptions::trailing_controls_width`) but it is **off by default**, and nothing pretends this is SSF semantics. |
 | Candidate-to-candidate spacing | Not exposed by `skin.ini`. Currently a derived constant in `SsfLayout.cpp` (`cand_gap`), kept in one place so it can be retuned against a reference screenshot. |
 
 ---
@@ -258,11 +258,11 @@ Tuning a bitmap skin through a live IME is slow. `ssf_preview.exe` drives the
 same parser, layout engine and compositor and writes a PNG:
 
 ```
-dist\ssf_preview.exe D:\RimeUser\Color-P --out preview.png
-dist\ssf_preview.exe D:\RimeUser\Color-P --scheme H1 --out h1.png
-dist\ssf_preview.exe D:\RimeUser\Color-P --scheme V2 --out v2.png
-dist\ssf_preview.exe D:\RimeUser\Color-P --inspect
-dist\ssf_preview.exe D:\RimeUser\Color-P --debug --preedit "ni" \
+dist\ssf_preview.exe D:\RimeUser\SSF --out preview.png
+dist\ssf_preview.exe D:\RimeUser\SSF --scheme H1 --out h1.png
+dist\ssf_preview.exe D:\RimeUser\SSF --scheme V2 --out v2.png
+dist\ssf_preview.exe D:\RimeUser\SSF --inspect
+dist\ssf_preview.exe D:\RimeUser\SSF --debug --preedit "ni" \
     --candidates "你好|你号" --labels "1.|2." --out short.png
 ```
 
@@ -287,7 +287,7 @@ Diagnostics are compiled out by default. Define `WEASEL_SSF_LOGGING` to enable
 messages such as:
 
 ```
-[SSF] loaded skin '【竹子】Color-P' from D:\RimeUser\Color-P
+[SSF] loaded skin '【竹子】SSF' from D:\RimeUser\SSF
 [SSF] font_size=14 font_ch=汉仪细中圆简 font_en=Arial
 [SSF] missing image: skin2.png
 [SSF] disabled

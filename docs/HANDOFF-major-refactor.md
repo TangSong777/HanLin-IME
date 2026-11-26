@@ -1,16 +1,16 @@
-# 交接任务：Color-P 大重构（自研前端 + librime 升级 + 全量优化 + 仓库改名）
+# 交接任务：SSF 大重构（自研前端 + librime 升级 + 全量优化 + 仓库改名）
 
 > 交接对象：Codex
-> 交接人：DeepSeek Harness（Color-P 维护会话）
+> 交接人：DeepSeek Harness（SSF 维护会话）
 > 日期：2026-11-18
 > 仓库：`D:\Rime`（分支 `snapshot`，HEAD `29a261c`，版本 0.1.7）
-> GitHub：`TangSong777/Color-P`
+> GitHub：`TangSong777/SSF`
 
 ---
 
 ## 零、一句话目标
 
-把 Color-P 从「Weasel 前端 + librime 引擎」改造成「**自研 TSF 前端 + 最新 librime 引擎**」，同时做全量性能优化，并把仓库改名为「寒淋输入法」（`HanLin-xxxx`）。
+把 SSF 从「Weasel 前端 + librime 引擎」改造成「**自研 TSF 前端 + 最新 librime 引擎**」，同时做全量性能优化，并把仓库改名为「寒淋输入法」（`HanLin-xxxx`）。
 
 ---
 
@@ -28,7 +28,7 @@
             → rime-ice 方案（D:\RimeUser）
 ```
 
-候选窗口由 `src/WeaselUI/` 渲染（GDI+ / DirectWrite），皮肤是 Color-P（SSF 兼容层）。
+候选窗口由 `src/WeaselUI/` 渲染（GDI+ / DirectWrite），皮肤是 SSF（SSF 兼容层）。
 
 ### 1.2 关键路径
 
@@ -42,7 +42,7 @@
 | 构建脚本 | `D:\Rime\src\build-weasel.ps1`、`D:\Rime\src\build-support\Find-Toolchain.ps1` |
 | 部署脚本 | `D:\Rime\src\deploy-tsf.ps1`（TSF DLL）、`WeaselDeployer.exe /deploy`（配置） |
 | 账本 | `D:\Rime\PENDING-CHANGES.md` |
-| 版本号 | `src/installer/Color-P.iss:23/25`、`src/installer/build-installer.ps1:42` |
+| 版本号 | `src/installer/SSF.iss:23/25`、`src/installer/build-installer.ps1:42` |
 
 ### 1.3 当前状态（2026-11-18）
 
@@ -116,7 +116,7 @@
 
 ### 2.3 候选窗口
 
-当前 `src/WeaselUI/` 用 GDI+ / DirectWrite 渲染，皮肤是 Color-P（SSF 兼容层）。自研前端可以：
+当前 `src/WeaselUI/` 用 GDI+ / DirectWrite 渲染，皮肤是 SSF（SSF 兼容层）。自研前端可以：
 
 - **方案 1**：复用 `src/WeaselUI/` 的渲染代码（`WeaselPanel.cpp`、`Layout.cpp`、`DirectWriteResources.cpp`）
 - **方案 2**：用 Direct2D 重写（更现代，但工作量大）
@@ -231,9 +231,9 @@ codex 在 1.13.1 源码上做了这些改动，**必须移植到 1.17.0**：
 
 ### 5.1 目标
 
-- GitHub 仓库：`TangSong777/Color-P` → `TangSong777/HanLin-xxxx`（具体后缀由用户定）
-- 项目名：Color-P → **寒淋输入法**
-- 安装包名：`Color-P-Setup-x.y.z.exe` → `HanLin-Setup-x.y.z.exe`
+- GitHub 仓库：`TangSong777/SSF` → `TangSong777/HanLin-xxxx`（具体后缀由用户定）
+- 项目名：SSF → **寒淋输入法**
+- 安装包名：`SSF-Setup-x.y.z.exe` → `HanLin-Setup-x.y.z.exe`
 
 ### 5.2 需要改的地方
 
@@ -243,11 +243,11 @@ codex 在 1.13.1 源码上做了这些改动，**必须移植到 1.17.0**：
 | 本地 remote | `git remote set-url origin https://github.com/TangSong777/HanLin-xxxx.git` |
 | `README.md` | 标题、徽章、链接、安装包名 |
 | `CHANGELOG.md` | 项目名 |
-| `src/installer/Color-P.iss` | `MyAppName`、`OutputBaseFilename`、`AppId` |
+| `src/installer/SSF.iss` | `MyAppName`、`OutputBaseFilename`、`AppId` |
 | `src/installer/build-installer.ps1` | `$PackageName`、`$PackageVersion` |
 | `src/WeaselTSF/WeaselTSF.rc` | 产品名、公司名 |
 | `src/WeaselUI/` | 窗口标题 |
-| 皮肤目录 | `C:\ProgramData\ColorPWeasel\Color-P` → 新名字 |
+| 皮肤目录 | 本机旧皮肤目录 → 新名字 |
 | 注册表 | `HKLM:\SOFTWARE\WOW6432Node\Rime\Weasel` 的 `WeaselRoot` |
 
 ### 5.3 注意

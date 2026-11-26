@@ -1836,7 +1836,7 @@ bool WeaselPanel::_SsfReloadSkin() {
 
   ssf_skin_storage_ = weasel::ssf::ParseSkinIni(raw.data(), raw.size());
 #ifdef HANLIN_PANEL
-  // Keep the original Color-P metrics even if an older installer left its
+  // Keep the original SSF metrics even if an older installer left its
   // skin.ini behind. Use the Windows family name for reliable lookup.
   ssf_skin_storage_.font_size = 16;
   ssf_skin_storage_.font_ch = "SimSun";
@@ -1901,7 +1901,7 @@ void WeaselPanel::_SsfInitFonts() {
   // SSF's font_size is an authored pixel size, not a typographic point size.
   // Keep the art and glyphs proportional on a scaled monitor, then pass that
   // device-pixel value to the 96-DPI DirectWrite DC render target as DIPs.
-  // This makes Color-P's font_size=12 render as 12px at 100% DPI.
+  // This makes SSF's font_size=12 render as 12px at 100% DPI.
   const float layout_scale =
       pDWR->dpiScaleLayout > 0.0f ? pDWR->dpiScaleLayout : 1.0f;
   const float pixel_size =
@@ -2111,7 +2111,7 @@ void WeaselPanel::_SsfDrawText(CDCHandle memDC) {
        weasel::ssf::ITextMeasurer::PINYIN);
 
   // Candidates. The highlighted one uses zhongwen_first_color, the rest
-  // zhongwen_color, which is exactly the distinction Color-P relies on.
+  // zhongwen_color, which is exactly the distinction SSF relies on.
   for (size_t i = 0; i < L.candidates.size(); ++i) {
     const bool hl = (static_cast<int>(i) == rtext.highlighted);
     const weasel::ssf::Color& c = hl ? skin.zhongwen_first_color

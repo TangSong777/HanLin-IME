@@ -32,7 +32,7 @@ void NormalizeScheme(Scheme& s) {
   //
   // i.e. NOT the more familiar left, top, right, bottom.
   //
-  // Concretely, with Color-P's [Scheme_H2]:
+  // Concretely, with SSF's [Scheme_H2]:
   //     pinyin_marge   = 7,6,8,10  -> top 7, bottom 6, left  8, right 10
   //     zhongwen_marge = 10,9,8,8  -> top 10, bottom 9, left 8, right  8
   // -------------------------------------------------------------------------

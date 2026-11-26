@@ -18,7 +18,7 @@
 让 Rime 小狼毫（Weasel）能 **1:1 使用搜狗输入法 SSF 皮肤**。不是用 YAML 模仿颜色，
 而是实现一套「Sogou SSF compatibility layer」，直接读取并渲染皮肤素材。
 
-皮肤：**【竹子】Color-P**（`skin_version=0.9`，作者 墨竹）
+皮肤：**【竹子】SSF**（`skin_version=0.9`，作者 原作者）
 
 最终形态：
 
@@ -55,7 +55,7 @@
 | `D:\桌面\Harness工作区\皮肤\build-libs\` | `rime_x64.lib` / `rime_x86.lib` 导入库 |
 | `D:\桌面\Harness工作区\皮肤\ssfconv\` | Python 参考实现（参数语义佐证） |
 | `D:\桌面\Harness工作区\皮肤\9ime\` | **Rust 版 Weasel fork，含 SSF 支持**（关键参考） |
-| `D:\桌面\Harness工作区\皮肤\DEPLOY-Color-P\` | 部署包 |
+| `D:\桌面\Harness工作区\皮肤\DEPLOY-SSF\` | 部署包 |
 | `D:\桌面\Harness工作区\2026-09-12_15-06-58.png` | **参考截图（搜狗正常效果，目标）** |
 
 ---
@@ -133,7 +133,7 @@ docs/build-weasel.md               构建说明 + 所有陷阱
 | 颜色 | **BGR 字节序**：`0x6e6cff` → RGB**(255,108,110)** | **与 skin2.png 实测像素完全吻合 —— 决定性证据** |
 | `pinyin_pic` / `zhongwen_pic` | **拼音区/候选区背景图**，不是高亮图 | 实测 skin2_1.png 是纯粉圆角条、skin1_2.png 是粉边白底框 |
 | `*_pos=x,y` | 按钮相对状态栏背景的坐标 | `menu_pos=73,3` + 26px = 99，正好贴 100px 背景右缘 |
-| `skin.ini` 编码 | **UTF-16LE BOM**（Color-P 实测） | 字节级检查 |
+| `skin.ini` 编码 | **UTF-16LE BOM**（SSF 实测） | 字节级检查 |
 
 > ⚠️ **推翻了 9IME 对 `pinyin_pic` 的解释** —— 它当高亮图，所以渲染不出两段式效果。
 > 这正是之前移植失败的原因。
@@ -236,7 +236,7 @@ y=94..121  白底 + 密集深色文字  x=50..720
 
 `SsfImage::CropTransparentBorders()` **已实现但尚未接线**。原因分析：
 
-Color-P 的图**上下有全透明行**（`skin2.png` 上 6 行、下 2 行）。
+SSF 的图**上下有全透明行**（`skin2.png` 上 6 行、下 2 行）。
 `BlitNineSlice` 的边缘区是**按比例缩放**的，于是这些透明行被放大，
 在目标里画出透明带 → 就是"缝隙"。
 
@@ -413,16 +413,16 @@ Start-Process 'D:\Rime\weasel-0.17.4\WeaselServer.exe' -WorkingDirectory 'D:\Rim
 
 ```
 [SSF] _UpdateUIStyle enter init=1 style.ssf_skin(before)=''
-[SSF] global settings: skin='Color-P' enabled=1 status_bar=0 style_addr=0x...
-[SSF] _UpdateUIStyle exit init=1 style.ssf_skin='Color-P' enabled=1
-[SSF] m_base_style captured: skin='Color-P' enabled=1
-[SSF] Run: after m_handler->Initialize skin='Color-P'
-[SSF] Run: after m_ui.Refresh skin='Color-P'
+[SSF] global settings: skin='SSF' enabled=1 status_bar=0 style_addr=0x...
+[SSF] _UpdateUIStyle exit init=1 style.ssf_skin='SSF' enabled=1
+[SSF] m_base_style captured: skin='SSF' enabled=1
+[SSF] Run: after m_handler->Initialize skin='SSF'
+[SSF] Run: after m_ui.Refresh skin='SSF'
         ↓ 面板侧 ↓
-refresh: before _InitFontRes skin='Color-P' addr=0x...
-reload: enabled=1 skin='Color-P' loaded=0 same=0
+refresh: before _InitFontRes skin='SSF' addr=0x...
+reload: enabled=1 skin='SSF' loaded=0 same=0
 user data dir (registry/AppData) = 'D:\RimeUser'
-[SSF] loaded skin '【竹子】Color-P' from D:\RimeUser\Color-P
+[SSF] loaded skin '【竹子】SSF' from D:\RimeUser\SSF
 [SSF] font_size=14 font_ch=汉仪细中圆简 font_en=Arial
 createLayout: SSF active
 ```
@@ -436,11 +436,11 @@ createLayout: SSF active
 ### 离屏预览工具
 
 ```powershell
-ssf_preview.exe D:\RimeUser\Color-P --out preview.png
-ssf_preview.exe D:\RimeUser\Color-P --inspect          # 打印解析结果+缺图
-ssf_preview.exe D:\RimeUser\Color-P --debug            # 打印所有矩形
-ssf_preview.exe D:\RimeUser\Color-P --scheme H1|H2|V1|V2 --out x.png
-ssf_preview.exe D:\RimeUser\Color-P --preedit "ni" --candidates "你好|你号" --out y.png
+ssf_preview.exe D:\RimeUser\SSF --out preview.png
+ssf_preview.exe D:\RimeUser\SSF --inspect          # 打印解析结果+缺图
+ssf_preview.exe D:\RimeUser\SSF --debug            # 打印所有矩形
+ssf_preview.exe D:\RimeUser\SSF --scheme H1|H2|V1|V2 --out x.png
+ssf_preview.exe D:\RimeUser\SSF --preedit "ni" --candidates "你好|你号" --out y.png
 ```
 
 **重要**：预览工具用 **GDI** 测量文字，实时输入法用 **DirectWrite**，
@@ -476,8 +476,8 @@ pwsh -File build-ssf-tests.ps1 -Run     # 232 checks，当前全绿
 
 | 路径 | 内容 |
 |---|---|
-| `D:\RimeUser\Color-P\` | 皮肤（skin.ini + 26 PNG），**实测可用的真实素材** |
-| `D:\桌面\Harness工作区\皮肤\Color-P-resources\` | 皮肤原始副本 |
+| `D:\RimeUser\SSF\` | 皮肤（skin.ini + 26 PNG），**实测可用的真实素材** |
+| `D:\桌面\Harness工作区\皮肤\SSF-resources\` | 皮肤原始副本 |
 | `D:\桌面\Harness工作区\2026-09-12_15-06-58.png` | **参考截图（搜狗正常效果，目标）** |
 | `D:\桌面\Harness工作区\皮肤\CURRENT.png` | 当前渲染结果（用于对比） |
 | `D:\RimeUser-backup-20260912-143215\` | 用户最完整配置（167 文件，含 rime_ice 词库） |
@@ -494,7 +494,7 @@ pwsh -File build-ssf-tests.ps1 -Run     # 232 checks，当前全绿
 
 1. 读 `docs/ssf-skin.md`（逆向证据链）和本文第 8 节（坑）
 2. 跑 `build-ssf-tests.ps1 -Run` 确认环境正常（应 232 全绿）
-3. 跑 `ssf_preview.exe D:\RimeUser\Color-P --debug` 看当前几何
+3. 跑 `ssf_preview.exe D:\RimeUser\SSF --debug` 看当前几何
 4. **做待办 A**（透明带）—— 这是用户最明显的抱怨，且根因已完全定位
 5. 用参考截图逐项核对 B/C/D
 

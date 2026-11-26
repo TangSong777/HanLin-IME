@@ -7,7 +7,7 @@
 | 版本 | `1.2.0` |
 | 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
 | 安装包 | `HanLin-Setup-<版本>.exe`，适用于 x64 Windows |
-| 许可证 | GPL-3.0（代码）· 皮肤素材版权归原作者 |
+| 许可证 | GPL-3.0（代码）· 界面与候选窗由 HanLin 项目自行设计 |
 
 ## 目录
 
@@ -734,6 +734,6 @@ git checkout snapshot
 - 输入引擎：[librime](https://github.com/rime/librime)（BSD-3-Clause）
 - 候选窗渲染代码：[Weasel 小狼毫](https://github.com/rime/weasel)（GPL-3.0）
 - 拼音方案：[rime-ice 雾凇拼音](https://github.com/iDvel/rime-ice)（GPL-3.0）
-- 本机曾使用的「竹子 Color-P」皮肤作者为**墨竹**。公开安装包采用项目内置主题。
+- 候选窗与界面主题由 HanLin 项目自行设计与实现。
 
-本项目为个人定制作品，基于上述开源项目与皮肤资源二次开发，不是任何上游项目的官方版本，也未获得搜狗授权或背书。源代码遵循上游 Weasel 的 GPL-3.0；皮肤图片资源版权归原作者，仅作个人学习与自用移植。
+本项目基于上述开源项目二次开发，不是任何上游项目的官方版本。源代码遵循上游 Weasel 的 GPL-3.0；界面与候选窗视觉方案由 HanLin 项目自行设计。

@@ -17,7 +17,7 @@ OnActivated(FALSE)
 ```
 
 `Destroy(true)` 会 `delete pimpl_`、`pDWR.reset()`，也就是把整个 `WeaselPanel` 丢掉：
-GDI+ 会话、已解码的 12 张 Color-P PNG（`SsfImageStore`）、DirectWrite 字体格式
+GDI+ 会话、已解码的 12 张 SSF PNG（`SsfImageStore`）、DirectWrite 字体格式
 （`ssf_formats_`）全部释放。切回来第一次打字才在按键路径上同步重建。
 
 注意 `CCandidateList::EndUI()` 用的是**默认** `UI::Destroy(false)`，本来就只销窗口、
@@ -67,7 +67,7 @@ GDI+ 会话、已解码的 12 张 Color-P PNG（`SsfImageStore`）、DirectWrite
 ## 部署状态
 
 本节记录修复当天（2026-10-07）的部署过程，**当时的版本号已过时**；当前实际部署见仓库根
-`README.md` 与 `C:\Users\27974\Documents\Codex\2026-09-11\new-chat-2\outputs\Color-P-UI\deployment-status.json`。
+`README.md` 与 `C:\Users\27974\Documents\Codex\2026-09-11\new-chat-2\outputs\SSF-UI\deployment-status.json`。
 
 当时的过程与结论：
 

@@ -42,7 +42,7 @@ std::wstring ChooseFontFace(const Skin& skin,
   const std::wstring ch = Utf8ToWide(skin.font_ch);
   const std::wstring en = Utf8ToWide(skin.font_en);
 
-  // Numeric selector labels ("1.", "2." …) are ASCII, but Color-P/Sogou
+  // Numeric selector labels ("1.", "2." …) are ASCII, but SSF/Sogou
   // styles them with the CJK face. Keep this rule here as well as in the
   // DirectWrite format setup so the fallback and preview renderers agree.
   if (kind == ITextMeasurer::LABEL && !ch.empty()) return ch;
@@ -202,7 +202,7 @@ void SsfRenderer::DrawStatusBar(SsfImage& surface,
   SsfImagePtr bar = images_.Get(skin.status.pic);
   if (bar) {
     // The status bar background is a plain rectangle in every skin observed so
-    // far (100x29 for Color-P), so it is drawn 1:1 and clipped rather than
+    // far (100x29 for SSF), so it is drawn 1:1 and clipped rather than
     // 9-sliced: stretching it would move the button artwork relative to the
     // declared *_pos coordinates, and the whole point of *_pos is that the
     // button sits at a fixed place on that artwork.

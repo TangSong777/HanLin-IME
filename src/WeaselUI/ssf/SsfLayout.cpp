@@ -116,7 +116,7 @@ SsfLayoutResult SsfLayoutEngine::Compute(const Skin& skin,
 
   int cand_row_w = inner_left + inner_right;
   if (cand_count) {
-    // Any trailing controls are an explicit caller option. Color-P's SSF
+    // Any trailing controls are an explicit caller option. SSF's SSF
     // artwork does not define controls in the candidate strip.
     cand_row_w += S(options.trailing_controls_width, scale);
     for (size_t i = 0; i < cand_count; ++i) {
@@ -238,7 +238,7 @@ SsfLayoutResult SsfLayoutEngine::Compute(const Skin& skin,
   const int py_content_h = preedit_text_h + aux_text_h;
   const int py_slack = (std::max)(0, final_py_h - py_content_h);
   int y = py_top + (std::max)(0, final_py_h - pinyin_strip_h) / 2;
-  // Color-P's H1 artwork has six transparent rows above its visible pink
+  // SSF's H1 artwork has six transparent rows above its visible pink
   // shoulder. Sogou positions its composition string against that visible
   // shoulder, not the bitmap's physical top, which puts the string three pixels
   // higher than the raw H1 margin arithmetic. Keep this skin-specific nudge

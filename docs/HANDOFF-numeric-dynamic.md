@@ -1,7 +1,7 @@
 # 交接任务：把 numeric 词库改成「动态识别数字」
 
 > 交接对象：Codex
-> 交接人：DeepSeek Harness（Color-P 维护会话）
+> 交接人：DeepSeek Harness（SSF 维护会话）
 > 日期：2026-11-18
 > 仓库：`D:\Rime`（分支 `snapshot`，HEAD `29a261c`，版本 0.1.7）
 
@@ -9,12 +9,12 @@
 
 ## 一、项目背景
 
-Color-P 是一个 Windows 输入法项目，基于：
+SSF 是一个 Windows 输入法项目，基于：
 
 - **Weasel 0.17.4**（TSF 前端，源码在 `D:\Rime\src`）
 - **官方 librime 1.13.1 预编译 `rime.dll`**（`D:\Rime\src\dist\rime.dll`，3,524,096 字节，含 librime-lua 插件）
 - **rime-ice** 方案（配置在 `D:\RimeUser`）
-- 自定义皮肤（Color-P / 墨竹）
+- 自定义皮肤（SSF / 原作者）
 
 关键路径：
 

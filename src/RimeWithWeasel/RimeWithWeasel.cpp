@@ -1057,7 +1057,7 @@ bool RimeWithWeaselHandler::_ShowMessage(WeaselSessionId ipc_id,
   // The candidate window owns that state and must replace the tip at once.
   if (!show_icon && counter)
     return counter && ctx.empty();
-  // The Color-P CN/EN hint is a skin-owned, cursor-near overlay rather than a
+  // The SSF CN/EN hint is a skin-owned, cursor-near overlay rather than a
   // normal textual notification.  Do not make its only display path depend on
   // show_notifications: most schemas leave ascii_mode out of that map, which
   // previously meant a real toggle updated the status but never showed cn2.png

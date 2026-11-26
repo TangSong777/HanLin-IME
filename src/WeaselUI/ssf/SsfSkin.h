@@ -15,7 +15,7 @@
 //   colours           = 0xRRGGBB written in BGR byte order
 //
 // Verified against: fkxxyz/ssfconv, Flygeon/9IME, and pixel-level analysis of
-// the bundled Color-P skin.
+// the bundled SSF skin.
 
 #pragma once
 
@@ -111,7 +111,7 @@ struct Scheme {
   // for the pinyin (preedit) strip and for the candidate strip.
   //
   // NOTE: 9IME treats pinyin_pic/zhongwen_pic as *highlight* images. For
-  // Color-P that is demonstrably wrong -- see docs/ssf-skin.md §2.5.
+  // SSF that is demonstrably wrong -- see docs/ssf-skin.md §2.5.
   std::string pinyin_pic;
   std::string zhongwen_pic;
   std::string pinyin_pic_hover;

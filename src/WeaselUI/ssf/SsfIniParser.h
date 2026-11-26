@@ -19,7 +19,7 @@ namespace ssf {
 // ---------------------------------------------------------------------------
 
 // Decode raw skin.ini bytes in the encodings real skins use, in this order:
-//   1. UTF-16LE with BOM      (FF FE)   <- what the bundled Color-P skin uses
+//   1. UTF-16LE with BOM      (FF FE)   <- what the bundled SSF skin uses
 //   2. UTF-16BE with BOM      (FE FF)
 //   3. UTF-8 with BOM         (EF BB BF)
 //   4. strict UTF-8
@@ -88,7 +88,7 @@ bool ParseMargin4(const std::string& value, Margin4& out);
 
 // A Sogou colour. skin.ini writes them as `0xRRGGBB` but stores the bytes in
 // BGR order, so `0x6e6cff` is actually RGB(255,108,110) -- verified against the
-// pixels of the bundled Color-P skin (see docs/ssf-skin.md §2.3).
+// pixels of the bundled SSF skin (see docs/ssf-skin.md §2.3).
 //
 // `with_alpha` selects whether a leading alpha byte is expected:
 //   false -> value is 0xRRGGBB, result is fully opaque

@@ -266,7 +266,7 @@ neither needs ATL, WTL, Boost, WinSparkle or librime, and they build in seconds.
   member function, so the SSF layout result type is named `SsfLayoutResult`.
 * **`.rc` files are UTF-16LE with a BOM.** `rc.exe` handles that natively; do not
   convert them.
-* **`skin.ini` for the Color-P skin is UTF-16LE too** — see `ssf-skin.md` §3.1.
+* **`skin.ini` for the SSF skin is UTF-16LE too** — see `ssf-skin.md` §3.1.
 
 ## 8. If you upgrade Weasel
 

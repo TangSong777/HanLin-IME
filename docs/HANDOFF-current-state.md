@@ -28,7 +28,7 @@
             → rime-ice 方案（D:\RimeUser）
 ```
 
-候选窗口由 `src/WeaselUI/` 渲染（GDI+ / DirectWrite），皮肤是 Color-P（SSF 兼容层）。
+候选窗口由 `src/WeaselUI/` 渲染（GDI+ / DirectWrite），皮肤是 SSF（SSF 兼容层）。
 
 ### 1.2 关键路径
 
@@ -84,7 +84,7 @@
 
 **现状**：
 - 候选窗由 `src/WeaselUI/` 渲染（GDI+ / DirectWrite）
-- 皮肤是 Color-P（SSF 兼容层，`C:\ProgramData\ColorPWeasel\Color-P`）
+- 皮肤为 SSF 兼容层（读取本机皮肤目录）
 - `skin.ini` 控制字体、颜色、间距
 
 **建议方向**：

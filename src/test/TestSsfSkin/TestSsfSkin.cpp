@@ -88,14 +88,14 @@ std::string Utf8Bytes(const std::wstring& text) {
   return out;
 }
 
-// The Color-P skin.ini, reduced but structurally identical to the real file,
+// The SSF skin.ini, reduced but structurally identical to the real file,
 // including the awkward bits: a UTF-16LE-style key ordering, the misspelled
 // "marge", a leading mode field in every layout triple, and lower-case/upper
 // case section-name inconsistencies.
 const char* kColorPIni =
     "[General]\n"
     "skin_id=487582\n"
-    "skin_name=Color-P test\n"
+    "skin_name=SSF test\n"
     "skin_version=0.9\n"
     "skin_author=test\n"
     "\n"
@@ -336,7 +336,7 @@ void TestSkinParsing() {
   const std::string ini(kColorPIni);
   Skin skin = ParseSkinIni(ini.data(), ini.size());
 
-  CheckStr(skin.skin_name, "Color-P test", "skin_name");
+  CheckStr(skin.skin_name, "SSF test", "skin_name");
   CheckEq(skin.font_size, 14, "font_size");
   CheckStr(skin.font_ch, "SimSun", "font_ch");
   CheckStr(skin.font_en, "Arial", "font_en");
@@ -427,13 +427,13 @@ void TestSchemeSelection() {
 void TestEncoding() {
   g_case = "Encoding";
 
-  // UTF-16LE with BOM -- what the real Color-P skin.ini uses.
+  // UTF-16LE with BOM -- what the real SSF skin.ini uses.
   {
-    const std::wstring text = L"[General]\nskin_name=ColorP\n";
+    const std::wstring text = L"[General]\nskin_name=SSF\n";
     const std::string bytes = Utf16leBytes(text);
     const std::wstring decoded = DecodeIniText(bytes.data(), bytes.size());
     Skin skin = BuildSkinFromIni(ParseIni(decoded));
-    CheckStr(skin.skin_name, "ColorP", "utf16 skin_name");
+    CheckStr(skin.skin_name, "SSF", "utf16 skin_name");
   }
 
   // UTF-16LE carrying real Chinese text: the point of the whole encoding chain
@@ -450,11 +450,11 @@ void TestEncoding() {
 
   // UTF-8.
   {
-    const std::wstring text = L"[General]\nskin_name=Color-P\n";
+    const std::wstring text = L"[General]\nskin_name=SSF\n";
     const std::string bytes = Utf8Bytes(text);
     const std::wstring decoded = DecodeIniText(bytes.data(), bytes.size());
     Skin skin = BuildSkinFromIni(ParseIni(decoded));
-    CheckStr(skin.skin_name, "Color-P", "utf8 skin_name");
+    CheckStr(skin.skin_name, "SSF", "utf8 skin_name");
   }
 
   // UTF-8 BOM must be stripped, otherwise the first key is corrupt.

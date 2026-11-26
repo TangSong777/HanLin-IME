@@ -319,7 +319,7 @@ struct UIStyle {
   //
   // Configured in weasel.custom.yaml as:
   //     patch:
-  //       style/ssf_skin: "Color-P"          # relative to RimeUserDir, or absolute
+  //       style/ssf_skin: "<skin-dir>"       # relative to RimeUserDir, or absolute
   //       style/ssf_enabled: true
   //       style/ssf_status_bar: true
   // ---------------------------------------------------------------------

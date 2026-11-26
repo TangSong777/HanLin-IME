@@ -56,7 +56,7 @@ Write-Host "== 编译验证装置 ==" -ForegroundColor Cyan
 & $iscc "/DHarnessRoot=$WorkRoot" (Join-Path $Here 'Harness.iss') | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Error "装置编译失败（exit $LASTEXITCODE）"; exit 2 }
 
-$exe = Join-Path $Here 'output\Color-P-Harness.exe'
+$exe = Join-Path $Here 'output\SSF-Harness.exe'
 if (-not (Test-Path $exe)) { Write-Error "找不到装置 $exe"; exit 2 }
 
 Write-Host "== 运行（工作目录 $WorkRoot）==" -ForegroundColor Cyan

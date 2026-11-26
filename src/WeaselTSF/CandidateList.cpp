@@ -472,7 +472,7 @@ void CCandidateList::_DisposeUIWindow() {
   // Weasel -- focussing another window and, importantly, switching to another
   // keyboard layout with Win+Space -- and also when a composition ends.
   // Destroy(true) deletes the UIImpl, and with it the WeaselPanel that owns the
-  // decoded Color-P images, the GDI+ session and the DirectWrite resources.
+  // decoded SSF images, the GDI+ session and the DirectWrite resources.
   // Switching back then had to rebuild all of that unattended, synchronously,
   // on the user's first keystroke: measured at ~185 ms even with every page
   // still cached, and the 0.5-2 s the user actually sees once Windows has

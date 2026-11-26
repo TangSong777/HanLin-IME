@@ -3,7 +3,7 @@
 //
 // The bug: leaving Weasel ran WeaselTSF's _DisposeUIWindow() -> UI::Destroy(true),
 // which deleted the whole WeaselPanel.  The next composition therefore had to
-// re-create GDI+, re-decode the Color-P PNGs and rebuild the DirectWrite
+// re-create GDI+, re-decode the SSF PNGs and rebuild the DirectWrite
 // resources unattended, synchronously, on the user's first keystroke.
 //
 // The fix, in two cooperating places:

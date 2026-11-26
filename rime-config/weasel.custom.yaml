@@ -1,4 +1,4 @@
-# Color-P：修改后请在小狼毫托盘菜单中重新部署。
+# 修改后请在小狼毫托盘菜单中重新部署。
 #
 # NOTE: style/ssf_* below switch the candidate window over to the Sogou SSF
 # compatibility renderer. Remove (or set style/ssf_enabled: false) to fall back
@@ -48,8 +48,8 @@ patch:
   style/layout/min_width: 0x00000000
   style/layout/min_height: 0x00000000
   preset_color_schemes/color_p:
-    name: 竹子 Color-P
-    author: 原作：墨竹；小狼毫配色移植
+    name: HanLin 内置
+    author: HanLin
     color_format: argb
     back_color: 0xFFF8F8F6
     border_color: 0xFFFF6C6E
