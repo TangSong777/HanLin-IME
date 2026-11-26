@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -285,28 +286,85 @@ namespace HanLin.Tools
             if (busy && e.CloseReason == CloseReason.UserClosing) e.Cancel = true;
             base.OnFormClosing(e);
         }
+
+        protected override bool ProcessCmdKey(ref Message message, Keys keys)
+        {
+            if (keys != (Keys.Control | Keys.F) || busy) return base.ProcessCmdKey(ref message, keys);
+            search.Focus();
+            return true;
+        }
     }
 
     internal sealed class SettingsWindow : HanLinForm
     {
-        internal SettingsWindow(HostActions host) : base("设置", new Size(556, 268))
+        internal SettingsWindow(HostActions host) : base("设置", new Size(600, 454))
         {
-            var layout = Theme.Layout(1, 28, 34, 14, 45, 44);
-            layout.Controls.Add(Theme.Label("用户配置目录", Theme.Small, Theme.Muted), 0, 0);
-            var directory = Theme.Field("用户配置目录");
+            Text = "寒淋输入法 · 设置";
+            Body.Padding = new Padding(20, 12, 20, 14);
+            var layout = Theme.Layout(1, 0, 12, 36);
+            var tabs = new SettingsTabs { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            layout.Controls.Add(tabs, 0, 0);
+
+            var general = AddSection(tabs, "常规", 24, 29, 44, 34, 0);
+            general.Controls.Add(Theme.Label("输入方案", Theme.Small, Theme.Muted), 0, 0);
+            general.Controls.Add(Theme.Label("雾凇拼音"), 0, 1);
+            var generalActions = Theme.Layout(2, 0);
+            generalActions.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, 152);
+            generalActions.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 100);
+            Add(generalActions, 0, "编辑输入方案…", () => Edit(host, "rime_ice.custom.yaml"));
+            general.Controls.Add(generalActions, 0, 2);
+            general.Controls.Add(Theme.Label("保存文件后，在「词库管理」中执行「一键部署」。", Theme.Small, Theme.Muted), 0, 3);
+
+            var appearance = AddSection(tabs, "外观", 30, 29, 29, 29, 34, 0);
+            appearance.Controls.Add(Theme.Label("候选窗", Theme.Heading), 0, 0);
+            var localSkin = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "HanLin", "Skin", "skin.ini");
+            appearance.Controls.Add(Theme.Label(File.Exists(localSkin) ? "主题 · 本机 SSF 皮肤" : "主题 · HanLin 暖白珊瑚"), 0, 1);
+            appearance.Controls.Add(Theme.Label("字体 · 宋体 / Arial"), 0, 2);
+            appearance.Controls.Add(Theme.Label("基准字号 · 16 px，随 Windows 显示缩放"), 0, 3);
+            appearance.Controls.Add(Theme.Label("已有本机皮肤会优先加载。", Theme.Small, Theme.Muted), 0, 4);
+
+            var data = AddSection(tabs, "数据", 24, 34, 44, 34, 0);
+            data.Controls.Add(Theme.Label("数据文件夹", Theme.Small, Theme.Muted), 0, 0);
+            var directory = Theme.Field("数据文件夹");
             directory.ReadOnly = true;
             directory.Text = host.DirectoryPath;
-            layout.Controls.Add(directory, 0, 1);
+            data.Controls.Add(directory, 0, 1);
             var buttons = Theme.Layout(3, 0);
-            Add(buttons, 0, "打开配置目录", () => {
+            buttons.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, 152);
+            buttons.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 152);
+            buttons.ColumnStyles[2] = new ColumnStyle(SizeType.Percent, 100);
+            Add(buttons, 0, "打开数据文件夹", () => {
                 Directory.CreateDirectory(host.DirectoryPath);
-                Process.Start(new ProcessStartInfo(host.DirectoryPath) { UseShellExecute = true }).Dispose();
+                using (Process.Start(new ProcessStartInfo(host.DirectoryPath) { UseShellExecute = true })) { }
             });
-            Add(buttons, 1, "编辑候选窗配置", () => Edit(host, "hanlin.custom.yaml"));
-            Add(buttons, 2, "编辑输入方案", () => Edit(host, "rime_ice.custom.yaml"));
-            layout.Controls.Add(buttons, 0, 3);
-            layout.Controls.Add(Theme.Label("改动配置后，可在词库管理中重新部署。", Theme.Small, Theme.Muted), 0, 4);
+            Add(buttons, 1, "编辑进阶配置…", () => Edit(host, "hanlin.custom.yaml"));
+            data.Controls.Add(buttons, 0, 2);
+            data.Controls.Add(Theme.Label("这里保存用户词库、方案配置和本地打字统计。", Theme.Small, Theme.Muted), 0, 3);
+
+            var about = AddSection(tabs, "关于", 30, 26, 34, 0);
+            about.Controls.Add(Theme.Label("寒淋输入法", Theme.Heading), 0, 0);
+            about.Controls.Add(Theme.Label("版本 " + Application.ProductVersion, Theme.Small, Theme.Muted), 0, 1);
+            about.Controls.Add(Theme.Label("Ctrl+F   在词库管理中搜索词条"), 0, 2);
+
+            var footer = Theme.Layout(2, 0);
+            footer.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 100);
+            footer.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 84);
+            var close = new InkButton("关闭", true) { Margin = Padding.Empty };
+            close.Click += (sender, args) => Close();
+            AcceptButton = close;
+            footer.Controls.Add(close, 1, 0);
+            layout.Controls.Add(footer, 0, 2);
             Body.Controls.Add(layout);
+            Shown += (sender, args) => tabs.FocusCurrentTab();
+        }
+
+        private static TableLayoutPanel AddSection(SettingsTabs tabs, string title, params float[] rows)
+        {
+            var fields = Theme.Layout(1, rows);
+            fields.Padding = new Padding(0, 16, 4, 8);
+            tabs.AddPage(title, fields);
+            return fields;
         }
 
         private void Add(TableLayoutPanel row, int column, string title, System.Action action)
@@ -326,6 +384,84 @@ namespace HanLin.Tools
             if (!File.Exists(file)) throw new FileNotFoundException("配置文件尚未生成。", file);
             var editor = Path.Combine(Environment.SystemDirectory, "notepad.exe");
             Process.Start(new ProcessStartInfo(editor, "\"" + file + "\"") { UseShellExecute = false }).Dispose();
+        }
+
+        private sealed class SettingsTabs : Panel
+        {
+            private readonly FlowLayoutPanel bar = new FlowLayoutPanel {
+                Dock = DockStyle.Top, Height = 37, WrapContents = false,
+                BackColor = Theme.Paper, AccessibleName = "设置分类", AccessibleRole = AccessibleRole.PageTabList
+            };
+            private readonly Panel pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Paper };
+
+            internal SettingsTabs()
+            {
+                Controls.Add(pages);
+                Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Theme.Line });
+                Controls.Add(bar);
+            }
+
+            internal void AddPage(string title, Control page)
+            {
+                var chip = new SettingTab(title);
+                bar.Controls.Add(chip);
+                page.Visible = false;
+                pages.Controls.Add(page);
+                chip.CheckedChanged += (sender, args) => {
+                    page.Visible = chip.Checked;
+                    if (chip.Checked) page.BringToFront();
+                };
+                if (bar.Controls.Count == 1) chip.Checked = true;
+            }
+
+            internal void FocusCurrentTab()
+            {
+                var tab = bar.Controls.OfType<SettingTab>().FirstOrDefault(item => item.Checked);
+                if (tab != null) tab.Focus();
+            }
+        }
+
+        private sealed class SettingTab : RadioButton
+        {
+            private bool hover;
+
+            internal SettingTab(string title)
+            {
+                Text = AccessibleName = title;
+                AccessibleRole = AccessibleRole.PageTab;
+                Appearance = System.Windows.Forms.Appearance.Button;
+                Width = 72;
+                Height = 32;
+                Margin = new Padding(0, 0, 4, 5);
+                FlatStyle = FlatStyle.Flat;
+                Cursor = Cursors.Hand;
+                SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+                CheckedChanged += (sender, args) => Invalidate();
+                GotFocus += (sender, args) => Invalidate();
+                LostFocus += (sender, args) => Invalidate();
+            }
+
+            protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); hover = true; Invalidate(); }
+            protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = false; Invalidate(); }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var graphics = e.Graphics;
+                graphics.Clear(Theme.Paper);
+                var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
+                if (bounds.Width <= 0 || bounds.Height <= 0) return;
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var chip = Theme.Rounded(bounds, Theme.Scale(7, DeviceDpi)))
+                using (var fill = new SolidBrush(Checked ? Theme.Tint : hover ? Theme.Hover : Theme.Paper))
+                using (var focus = new Pen(Theme.Alert))
+                {
+                    graphics.FillPath(fill, chip);
+                    if (Focused) graphics.DrawPath(focus, chip);
+                }
+                Color ink = Checked ? Theme.Alert : hover && SystemInformation.HighContrast ? Theme.AccentInk : Theme.Ink;
+                TextRenderer.DrawText(graphics, Text, Theme.Body, bounds, ink,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            }
         }
     }
 

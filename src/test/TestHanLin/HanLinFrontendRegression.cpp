@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <initializer_list>
 #include <string_view>
 
 using hanlin::ComPtr;
@@ -317,23 +318,35 @@ bool TestTextService(HMODULE library, bool tray, bool menu_request) {
         "HanLin TSF mode button right-click reaches the desktop menu");
   }
 
-  auto key = [&](UINT vk, bool shift = false, bool expect_eaten = true) {
+  struct KeyResult { bool succeeded; bool tested; bool eaten; };
+  auto send_key = [&](UINT vk, std::initializer_list<UINT> held, bool release = false,
+                      LPARAM flags = 0, bool preview_only = false) {
     BYTE original[256]{};
     GetKeyboardState(original);
     BYTE keyboard[256]{};
-    if (shift) keyboard[VK_SHIFT] = keyboard[VK_LSHIFT] = 0x80;
+    for (UINT modifier : held) keyboard[modifier] = 0x80;
     SetKeyboardState(keyboard);
     const auto scan = static_cast<LPARAM>(MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) & 0xff);
+    const auto param = (scan << 16) | 1 | flags | (release ? (3ULL << 30) : 0);
     BOOL tested = FALSE;
     BOOL eaten = FALSE;
-    const auto test = keys->OnTestKeyDown(context.Get(), vk, (scan << 16) | 1, &tested);
-    const auto result = keys->OnKeyDown(context.Get(), vk, (scan << 16) | 1, &eaten);
+    const auto test = release ? keys->OnTestKeyUp(context.Get(), vk, static_cast<LPARAM>(param), &tested) :
+        keys->OnTestKeyDown(context.Get(), vk, static_cast<LPARAM>(param), &tested);
+    const auto result = preview_only ? S_OK :
+        release ? keys->OnKeyUp(context.Get(), vk, static_cast<LPARAM>(param), &eaten) :
+            keys->OnKeyDown(context.Get(), vk, static_cast<LPARAM>(param), &eaten);
     SetKeyboardState(original);
     MSG message{};
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
-    const bool passed = SUCCEEDED(test) && SUCCEEDED(result) && !!eaten == expect_eaten &&
-        (!expect_eaten || tested);
-    if (!passed) std::printf("key 0x%x tested=%d eaten=%d expected=%d\n", vk, tested, eaten, expect_eaten);
+    return KeyResult{SUCCEEDED(test) && SUCCEEDED(result), tested != FALSE, eaten != FALSE};
+  };
+  auto key = [&](UINT vk, bool shift = false, bool expect_eaten = true) {
+    const auto result = send_key(vk, shift ? std::initializer_list<UINT>{VK_SHIFT, VK_LSHIFT} :
+                                            std::initializer_list<UINT>{});
+    const bool passed = result.succeeded && result.eaten == expect_eaten &&
+        (!expect_eaten || result.tested);
+    if (!passed) std::printf("key 0x%x tested=%d eaten=%d expected=%d\n",
+                            vk, result.tested, result.eaten, expect_eaten);
     return passed;
   };
   auto keys_for = [&](std::string_view spelling) {
@@ -341,10 +354,48 @@ bool TestTextService(HMODULE library, bool tray, bool menu_request) {
       if (!key(vk)) return false;
     return true;
   };
+  auto host_key = [&](UINT vk, std::initializer_list<UINT> held = {}, bool release = false,
+                      LPARAM flags = 0) {
+    const auto result = send_key(vk, held, release, flags);
+    const bool passed = result.succeeded && !result.tested && !result.eaten;
+    if (!passed) std::printf("host key 0x%x release=%d tested=%d eaten=%d\n",
+                            vk, release, result.tested, result.eaten);
+    return passed;
+  };
+  auto shift_press = [&] {
+    const auto result = send_key(VK_LSHIFT, {VK_SHIFT, VK_LSHIFT}, false, 0, true);
+    return result.succeeded && !result.tested;
+  };
 
   bool passed = true;
+  const bool clipboard = host_key('C', {VK_LCONTROL}) & host_key('V', {VK_RCONTROL}) &
+      host_key('X', {VK_CONTROL}) & host_key(VK_INSERT, {VK_SHIFT}) &
+      host_key(VK_INSERT, {VK_CONTROL});
+  const bool navigation = host_key('L', {VK_CONTROL}) & host_key(VK_LEFT, {}, false, 1L << 29) &
+      host_key('E', {VK_LWIN}) & host_key(VK_F2) & host_key(VK_F10, {VK_SHIFT}) &
+      host_key(VK_HOME, {VK_SHIFT}) & host_key(VK_BACK, {VK_CONTROL}) &
+      host_key('3', {VK_CONTROL, VK_SHIFT});
+  passed &= Check(clipboard && navigation && store->text.empty(),
+                  "host shortcuts pass both TSF preview and delivery");
+
+  const bool shift_chord = shift_press() && host_key(VK_CONTROL, {VK_SHIFT}) &&
+      host_key('V', {VK_SHIFT, VK_CONTROL}) && host_key(VK_CONTROL, {VK_SHIFT}, true) &&
+      host_key(VK_LSHIFT, {}, true);
+  passed &= Check(shift_chord && key('N') && key(VK_ESCAPE) && store->text.empty(),
+                  "a shortcut chord leaves Chinese mode unchanged");
+  const bool shift_to_ascii = shift_press() && send_key(VK_LSHIFT, {}, true).tested;
+  const bool ascii_passthrough = shift_to_ascii && key('N', false, false) && store->text.empty();
+  const bool shift_to_chinese = shift_press() && send_key(VK_LSHIFT, {}, true).tested;
+  passed &= Check(ascii_passthrough && shift_to_chinese && key('N') && key(VK_ESCAPE),
+                  "standalone Shift taps still toggle both input modes");
+
   const bool composed = keys_for("NIHAO");
   const auto preedit = store->text;
+  const bool composed_clipboard = host_key('C', {VK_CONTROL}) && host_key('C', {}, true) &&
+      host_key('V', {VK_CONTROL}) && host_key('V', {}, true) && host_key(VK_INSERT, {VK_SHIFT}) &&
+      host_key(VK_INSERT, {}, true);
+  passed &= Check(composed && composed_clipboard && store->text == preedit,
+                  "clipboard shortcuts and their releases pass during composition");
   store->reject_write_lock = true;
   const bool passed_through = composed && key('1', false, false) && store->text == preedit;
   store->reject_write_lock = false;
@@ -356,6 +407,13 @@ bool TestTextService(HMODULE library, bool tray, bool menu_request) {
   const bool rejected = pending && key('1') && !store->reject_next_commit && store->text == before_rejected_commit;
   passed &= Check(rejected && key('N') && key(VK_ESCAPE) && store->text == L"你好你好",
                   "transient write failure retries the text once");
+
+  const bool composing_back = keys_for("NIHAO");
+  const auto backspace = send_key(VK_BACK, {VK_CONTROL});
+  send_key(VK_ESCAPE, {});  // Cleanup if Rime kept any syllables.
+  passed &= Check(composing_back && backspace.succeeded && backspace.tested && backspace.eaten &&
+                      store->text == L"你好你好",
+                  "Ctrl+Backspace still edits the active IME composition");
 
   const bool unfinished = keys_for("NIHAO");
   store->reject_next_commit = true;

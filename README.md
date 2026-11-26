@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| 版本 | `1.0.0` |
+| 版本 | `1.2.0` |
 | 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
-| 安装包 | `HanLin-Setup-1.0.0.exe`，适用于 x64 Windows |
+| 安装包 | `HanLin-Setup-<版本>.exe`，适用于 x64 Windows |
 | 许可证 | GPL-3.0（代码）· 皮肤素材版权归原作者 |
 
 ## 目录
@@ -40,7 +40,7 @@
 
 ## 快速开始
 
-1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-1.0.0.exe`。
+1. 按[构建与测试](#构建与测试)生成本地安装包，运行 `HanLin-Setup-<版本>.exe`。
 2. 在 Windows 输入法列表选择「寒淋输入法」。
 3. 打一段拼音验证候选。
 
@@ -60,7 +60,7 @@
 |---|---|
 | **本项目独有** | 自研 HanLinTip 文本服务与 HanLinHost 后台、搜狗 SSF 皮肤兼容层、小键盘原义输入与混合输入、英文白名单与分层补全、退格三档、候选窗生命周期修补、时间戳触发码禁用、词条管理工具 |
 | **高度定制** | librime 1.17.0（动态数字识别与学词补丁）、雾凇方案、构建与安装器 |
-| **复用** | 候选窗渲染代码、雾凇基础词库与 Lua 脚本、Color-P 皮肤素材 |
+| **复用** | 候选窗渲染代码、雾凇基础词库与 Lua 脚本 |
 
 ## 功能
 
@@ -100,6 +100,8 @@
 ### 托盘菜单与词条工具
 
 右击任务栏上寒淋的「中」或「英」状态按钮，可查看今日打字量，并打开历史统计、词库管理或设置。输入后台默认隐藏独立的托盘图标。后台退出后，寒淋前端会在输入框获得焦点、继续输入或打开菜单时尝试恢复。也可从开始菜单打开「自定义词条」，或运行 `HanLinTools.exe --words`。
+
+「设置」包含常规、外观、数据、关于四页。在「数据」可以直接打开用户数据文件夹。在词库管理按 `Ctrl+F` 跳到搜索框。 [HanLin 系列设计规范](docs/HANLIN-SERIES.md)
 
 词库管理可以：
 
@@ -233,12 +235,12 @@ cC 1 0 0 / 4      →  100/4=25.0
 
 ### 安装包
 
-本地安装包随附 x64 和 x86 文本服务、寒淋后台与预编译雾凇词库。安装程序注册文本服务，并将寒淋后台加入登录启动项。另可选择附带的 Color-P 皮肤。[历史发布](https://github.com/TangSong777/HanLin-IME/releases)
+安装向导依次显示欢迎、许可声明、选择位置、确认、安装和完成。安装包随附 x64 与 x86 文本服务、寒淋后台和预编译雾凇词库。全新安装使用 HanLin 内置暖白珊瑚候选窗。升级时优先读取本机已有皮肤。安装程序需要管理员权限来注册输入服务。 [历史发布](https://github.com/TangSong777/HanLin-IME/releases)
 
 静默安装（需在已提权终端中运行）：
 
 ```powershell
-HanLin-Setup-1.0.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
+.\HanLin-Setup-1.2.0.exe /VERYSILENT /NORESTART /SUPPRESSMSGBOXES
 ```
 
 ### 安装布局
@@ -246,7 +248,7 @@ HanLin-Setup-1.0.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 | 内容 | 位置 |
 |---|---|
 | 输入法本体与共享词库 | `C:\Program Files\HanLin` |
-| 皮肤 | `C:\ProgramData\HanLin\Skin` |
+| 本机已有皮肤 | `C:\ProgramData\HanLin\Skin` |
 | Rime 用户目录 | `%APPDATA%\HanLin` |
 | 安装目录登记 | `HKLM\SOFTWARE\HanLin\InstallRoot`（x64 和 x86 注册表视图） |
 
@@ -275,6 +277,8 @@ HanLin-Setup-1.0.0.exe /SILENT /NORESTART /SUPPRESSMSGBOXES
 | `cC` + 小键盘数字/运算符 | 计算器，结果作为候选 |
 | 英文白名单 | `CHAtgpt`、`cpu`、`vscode`。支持混合大小写前缀补全 |
 | 语言栏左键 / 右键 | 切换中英文 / 打开寒淋菜单 |
+
+常用的 `Ctrl`、`Alt`、`Win` 组合键和应用功能键交给当前应用或 Windows。只有正在组合拼音时，寒淋才处理 `Ctrl+BackSpace`。单按 `Shift` 切换中英文。
 
 大小写匹配只作用于自定义英文编码。大写字母仍可参与整句，例如 `zuogeDNAjiance` → 做个DNA检测。
 
@@ -326,7 +330,7 @@ nihaowoshiyanghanlin         →  Enter 或 Shift+Enter 都上屏 nihaowoshiyang
 
 | 文件 | 职责 |
 |---|---|
-| `hanlin.custom.yaml` | 候选窗的皮肤、布局与字体，在 `patch` 下覆盖默认值 |
+| `hanlin.custom.yaml` | 在 `patch` 下设置全局中英切换行为 |
 | `default.custom.yaml` | 方案列表与全局快捷键 |
 | `rime_ice.custom.yaml` | 处理器/翻译器覆盖、按键绑定、英文分层、时间戳禁用、`speller/alphabet` |
 | `custom_phrase.txt` | 英文白名单与中文短码（`词条<Tab>编码`） |
@@ -431,7 +435,7 @@ pwsh -NoProfile -File (Join-Path $install 'Migrate-HanLinUserData.ps1') -Source 
 
 ### SSF 兼容层
 
-位于 `src/WeaselUI/ssf/`。解析 `skin.ini` 的布局与配色，按九宫格规则拉伸位图，逐像素合成 alpha，并把候选、编码、提示绘制到面板。皮肤素材原样保留在 `assets/Color-P/`（27 个文件）。
+位于 `src/WeaselUI/ssf/`。解析本机已有 `skin.ini` 的布局与配色，按九宫格规则拉伸位图，逐像素合成 alpha，并把候选、编码、提示绘制到面板。
 
 ### TSF 前端
 
@@ -508,11 +512,11 @@ pwsh -NoProfile -File .\src\build-hanlin.ps1 -EngineDll 'C:\Program Files\HanLin
 ### 打包安装器
 
 ```powershell
-# 需要 Inno Setup 6.3 或更新版本
+# 需要 Inno Setup 6.6 或更新版本
 pwsh -File .\src\installer\build-installer.ps1 -SharedDataDir <Rime共享数据目录> -RimeSourceDir <雾凇拼音源目录>
 ```
 
-打包程序先校验构建记录和白名单，再从共享数据与雾凇源目录预编译随包词库。编译时需退出寒淋后端。用 `-BuildRoot` 指定前端构建目录，用 `-OutputDir` 指定安装包输出目录。默认输出到 `src\installer\output`，文件名由版本号生成。
+打包程序先校验构建记录和白名单，再从共享数据与雾凇源目录预编译随包词库。编译在独立的空配置目录（`--compile-package-data`）中进行，不需要退出桌面后端，也不会改动当前用户已安装的输入法状态。用 `-BuildRoot` 指定前端构建目录，用 `-OutputDir` 指定安装包输出目录。默认输出到 `src\installer\output`，文件名由版本号生成。
 
 本机部署可运行 `src/deploy-tsf.ps1`，通过安装器注册双架构文本服务。可用 `-UserDataDir` 指定现有用户目录。更换本机旧后台时可通过 `-LegacyServerPath` 精确指定它的可执行文件，脚本会关闭该实例，并在寒淋后台完成握手后切换当前用户的输入法入口。
 
@@ -584,7 +588,6 @@ D:\Rime\                     # 仓库根
 │   ├── installer/           # 安装包构建（Inno Setup + payload）
 │   ├── tools/               # 词条管理工具（WordManager）
 │   └── test/                # 回归测试（TestSsfSkin / TestHanLin）
-├── assets/Color-P/          # 皮肤原始资源（skin.ini + 27 个图片）
 ├── rime-config/             # 运行时配置与词条
 ├── docs/                    # 文档（CUSTOM-WORDS.md、ADD-WORDS.md 等）
 ├── reference/               # 第三方快照，仅作查阅
@@ -631,16 +634,16 @@ import_tables:
 
 | 内容 | 位置 |
 |---|---|
-| 原始素材 | `assets/Color-P/` |
-| 启用与参数 | `hanlin.custom.yaml` 的 `style/ssf_skin`、`style/ssf_enabled` |
+| 全新安装默认 | HanLin 内置暖白珊瑚候选窗 |
+| 候选窗字体 | 宋体（SimSun）与 Arial，基准字号为 16 px，随 Windows 显示缩放 |
 | 已部署副本 | `C:\ProgramData\HanLin\Skin` |
 
-改素材后重新部署即可，无需重编译。
+安装程序保留本机已有的皮肤文件。候选窗启动时优先读取上述目录的 `skin.ini`。纯净安装使用程序绘制的内置主题。
 
 ### 可复现约定
 
 1. 脚本不写死机器路径，位置一律探测或由参数传入
-2. 同步版本号到 `HanLin.iss` 和 `HanLinVersion.rc`。打包脚本读取 `HanLin.iss`。
+2. 更新 `HanLin.iss` 的 `MyAppVersion`。CMake 从它生成版本头 `HanLinVersionDefs.h`，打包脚本也读同一个值。
 3. 发布前重跑生成脚本，保证文档与数据一致
 
 ## 版本与发布
@@ -681,6 +684,8 @@ snapshot ──► master ──► tag + Release
 
 | 版本 | 说明 |
 |---|---|
+| **1.2.0** | 共用安装向导、四页设置、宿主快捷键交还、HanLin 内置候选窗 |
+| **1.1.0** | 自绘托盘菜单、原生词库管理、打字统计 |
 | **1.0.0** | 首个正式版：自研前端稳定、词条工具、图标系统、README 重构 |
 | 0.2.2 | 缓存指纹刷新、版本单一来源、打包校验、迁移脚本 |
 | 0.2.1 | 恢复中英文混排（仅白名单英文） |
@@ -728,7 +733,7 @@ git checkout snapshot
 
 - 输入引擎：[librime](https://github.com/rime/librime)（BSD-3-Clause）
 - 候选窗渲染代码：[Weasel 小狼毫](https://github.com/rime/weasel)（GPL-3.0）
-- 拼音方案：[rime-ice 雾凇拼音](https://github.com/iDvel/rime-ice)（MIT）
-- 皮肤原作：搜狗「竹子 Color-P」，作者**墨竹**；本仓库仅做皮肤移植
+- 拼音方案：[rime-ice 雾凇拼音](https://github.com/iDvel/rime-ice)（GPL-3.0）
+- 本机曾使用的「竹子 Color-P」皮肤作者为**墨竹**。公开安装包采用项目内置主题。
 
 本项目为个人定制作品，基于上述开源项目与皮肤资源二次开发，不是任何上游项目的官方版本，也未获得搜狗授权或背书。源代码遵循上游 Weasel 的 GPL-3.0；皮肤图片资源版权归原作者，仅作个人学习与自用移植。

@@ -1,7 +1,7 @@
 ﻿寒淋输入法 HanLin-IME
 许可与第三方声明
 
-寒淋由 TangSong777 开发。安装包包含寒淋 TSF 文本服务、引擎进程、雾凇拼音词库和可选皮肤。
+寒淋由 TangSong777 开发。安装包包含寒淋 TSF 文本服务、引擎进程、雾凇拼音词库和 HanLin 内置候选窗。
 项目主页 https://github.com/TangSong777/HanLin-IME
 
 候选渲染代码基于小狼毫 Weasel 0.17.4。对应的 GNU GPL v3 许可见 licenses\Weasel.txt。
@@ -13,5 +13,4 @@
 雾凇拼音的词库、配置和 Lua 脚本许可见 licenses\rime-ice.txt。
 上游源码 https://github.com/iDvel/rime-ice
 
-可选「竹子 Color-P」的皮肤图片和 skin.ini 著作权归原作者墨竹所有。
-皮肤用于本地个人配置。
+程序支持读取本机已有的 SSF 皮肤。皮肤及其素材的著作权归相应权利人所有。

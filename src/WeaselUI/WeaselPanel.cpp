@@ -1835,6 +1835,13 @@ bool WeaselPanel::_SsfReloadSkin() {
   }
 
   ssf_skin_storage_ = weasel::ssf::ParseSkinIni(raw.data(), raw.size());
+#ifdef HANLIN_PANEL
+  // Keep the original Color-P metrics even if an older installer left its
+  // skin.ini behind. Use the Windows family name for reliable lookup.
+  ssf_skin_storage_.font_size = 16;
+  ssf_skin_storage_.font_ch = "SimSun";
+  ssf_skin_storage_.font_en = "Arial";
+#endif
 
   ssf_loaded_skin_id_ = wanted;
   ssf_skin_dir_ = dir;

@@ -1,12 +1,16 @@
-﻿#define MyAppName "寒淋输入法"
-#define MyAppVersion "1.1.0"
+#define MyAppName "寒淋输入法"
+#define MyAppVersion "1.2.0"
 #define MyAppVersionQuad MyAppVersion + ".0"
 #define MyAppPublisher "TangSong777"
 #define MyAppURL "https://github.com/TangSong777/HanLin-IME"
+#define SetupIntroZh "寒淋是 Windows 本地拼音输入法。安装程序需要管理员权限来注册输入服务。"
+#define SetupIntroEn "HanLin is a local Pinyin input method. Windows requires administrator permission to register the input service."
 
 #ifndef PayloadDir
   #error Use build-installer.ps1 to prepare PayloadDir.
 #endif
+
+#include "Brand\HanLinWizard.iss"
 
 [Setup]
 AppId={{8F3A7C21-4D6B-4E59-9A2F-7C1B5E8D3A04}
@@ -21,28 +25,13 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={code:DefaultInstallDir}
 DefaultGroupName={#MyAppName}
 UsePreviousAppDir=no
-DisableProgramGroupPage=yes
 LicenseFile=payload\LICENSE.txt
 OutputDir=output
 OutputBaseFilename=HanLin-Setup-{#MyAppVersion}
 SetupIconFile=..\HanLin\icons\hanlin.ico
-Compression=lzma2/max
-SolidCompression=yes
-ArchitecturesAllowed=x64os
-ArchitecturesInstallIn64BitMode=x64os
 PrivilegesRequired=admin
-WizardStyle=modern
-SetupLogging=yes
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\HanLinHost.exe
-MinVersion=10.0
-
-[Languages]
-Name: "chinese"; MessagesFile: "Languages\ChineseSimplified.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
-
-[Tasks]
-Name: "skin"; Description: "安装现有 Color-P 候选皮肤"; GroupDescription: "外观"; Flags: checkedonce
 
 [Files]
 Source: "{#PayloadDir}\HanLinHost.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -54,7 +43,6 @@ Source: "{#PayloadDir}\x64\HanLinTip.dll"; DestDir: "{app}\x64"; Flags: ignoreve
 Source: "{#PayloadDir}\x86\HanLinTip.dll"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit
 Source: "{#PayloadDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PayloadDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
-Source: "{#PayloadDir}\skin\*"; DestDir: "{commonappdata}\HanLin\Skin"; Flags: ignoreversion recursesubdirs; Tasks: skin
 
 [InstallDelete]
 Type: files; Name: "{app}\tools\WordManager.vbs"
@@ -70,13 +58,15 @@ Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType
 
 [Icons]
 Name: "{group}\启动寒淋输入法"; Filename: "{app}\HanLinHost.exe"
+Name: "{group}\设置"; Filename: "{app}\HanLinTools.exe"; Parameters: "--settings"
 Name: "{group}\自定义词条"; Filename: "{app}\HanLinTools.exe"; Parameters: "--words"
 Name: "{group}\打字统计"; Filename: "{app}\HanLinTools.exe"; Parameters: "--stats"
 Name: "{group}\卸载寒淋输入法"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{app}\HanLinHost.exe"; Parameters: "--enable-profile"; Flags: runasoriginaluser runhidden waituntilterminated; Check: StartAfterSetup
-Filename: "{app}\HanLinHost.exe"; Flags: runasoriginaluser runhidden nowait; Check: StartAfterSetup
+Filename: "{app}\HanLinHost.exe"; Description: "{cm:HanLinLaunch,{#MyAppName}}"; Flags: postinstall runasoriginaluser nowait skipifsilent; Check: StartAfterSetup
+Filename: "{app}\HanLinHost.exe"; Flags: runasoriginaluser nowait skipifnotsilent; Check: StartAfterSetup
 
 [UninstallRun]
 Filename: "{app}\HanLinHost.exe"; Parameters: "--stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopHanLinHost"

@@ -1,4 +1,2 @@
-# 可在 patch 下覆盖 hanlin.yaml 的键。ssf_skin 留空时使用随包的 Color-P 皮肤。
-patch:
-  style/ssf_enabled: true
-  style/ssf_skin: ""
+# 可在 patch 下覆盖 global_ascii。候选窗优先使用本机皮肤，否则使用 HanLin 内置主题。
+patch: {}

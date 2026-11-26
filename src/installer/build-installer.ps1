@@ -13,7 +13,6 @@ param(
     [string]$BuildRoot = (Join-Path $PSScriptRoot '..\output'),
     [string]$SharedDataDir,
     [string]$RimeSourceDir,
-    [string]$SkinDir,
     [string]$OutputDir = (Join-Path $PSScriptRoot 'output')
 )
 
@@ -53,15 +52,11 @@ if (-not $RimeSourceDir) {
     $RimeSourceDir = (Get-ItemProperty -LiteralPath 'HKCU:\Software\HanLin' -Name UserDataDir -ErrorAction SilentlyContinue).UserDataDir
     if (-not $RimeSourceDir) { $RimeSourceDir = Join-Path $env:APPDATA 'HanLin' }
 }
-if (-not $SkinDir) { $SkinDir = Join-Path $repo 'assets\Color-P' }
 if (-not $SharedDataDir -or -not (Test-Path -LiteralPath (Join-Path $SharedDataDir 'default.yaml') -PathType Leaf)) {
     throw '请用 -SharedDataDir 指定包含 default.yaml 的 Rime 共享数据。'
 }
 if (-not (Test-Path -LiteralPath (Join-Path $RimeSourceDir 'rime_ice.schema.yaml') -PathType Leaf)) {
     throw '请用 -RimeSourceDir 指定雾凇拼音源文件目录。'
-}
-if (-not (Test-Path -LiteralPath (Join-Path $SkinDir 'skin.ini') -PathType Leaf)) {
-    throw '皮肤目录缺少 skin.ini。'
 }
 
 function Copy-PayloadFile([string]$Source, [string]$Target) {
@@ -125,13 +120,6 @@ foreach ($item in Get-ChildItem -LiteralPath (Join-Path $config 'lua') -Filter '
 foreach ($name in 'default.custom.yaml','rime_ice.custom.yaml','custom_phrase.txt','hanlin.custom.yaml') {
     Copy-PayloadFile (Join-Path $config $name) (Join-Path $preset $name)
 }
-$skin = Join-Path $payload 'skin'
-New-Item -ItemType Directory -Path $skin | Out-Null
-foreach ($item in Get-ChildItem -LiteralPath $SkinDir -File) {
-    if ($item.Name -eq 'skin.ini' -or $item.Extension -match '^\.(?:png|jpe?g|ico|bmp)$') {
-        Copy-Item -LiteralPath $item.FullName -Destination $skin
-    }
-}
 Copy-PayloadFile (Join-Path $src 'LICENSE.txt') (Join-Path $payload 'licenses\Weasel.txt')
 Copy-PayloadFile (Join-Path $repo 'reference\librime-reference\LICENSE') (Join-Path $payload 'licenses\librime.txt')
 Copy-PayloadFile (Join-Path $RimeSourceDir 'LICENSE') (Join-Path $payload 'licenses\rime-ice.txt')
@@ -139,7 +127,7 @@ Copy-PayloadFile (Join-Path $RimeSourceDir 'LICENSE') (Join-Path $payload 'licen
 $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $payload 'HanLinHost.exe'))
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
-foreach ($argument in '--deploy', '--user-data', $compiledProfile) { $start.ArgumentList.Add($argument) }
+foreach ($argument in '--compile-package-data', $compiledProfile) { $start.ArgumentList.Add($argument) }
 $deploy = [Diagnostics.Process]::Start($start)
 try {
     $deploy.WaitForExit()
@@ -147,7 +135,6 @@ try {
 } finally {
     $deploy.Dispose()
 }
-if ($deployExit -eq 3) { throw '打包需要临时使用寒淋部署程序。请先退出正在运行的寒淋后端。' }
 if ($deployExit -ne 0) { throw "安装包词库编译失败，退出码 $deployExit。" }
 Copy-Item -LiteralPath (Join-Path $compiledProfile 'build') -Destination (Join-Path $data 'build') -Recurse
 
@@ -158,6 +145,10 @@ $private = @(Get-ChildItem -LiteralPath $payload -Recurse -Force | Where-Object 
     $_.Name -match '\.userdb(?:\.|$)|^(installation\.yaml|user\.yaml|sync|sogou_phrases\.txt)$'
 })
 if ($private) { throw "安装包混入用户数据 $($private[0].Name)。" }
+$localSkin = @(Get-ChildItem -LiteralPath $payload -Recurse -Force | Where-Object {
+    $_.Name -match '^(?:skin\.ini|Color-P)$|\.ssf$'
+})
+if ($localSkin) { throw "安装包混入本机皮肤资源 $($localSkin[0].Name)。" }
 $dataFiles = @((Get-ChildItem -LiteralPath $data -Recurse -Force -File).FullName; (Join-Path $payload 'rime.dll'))
 $revision = Get-HanLinContentFingerprint $payload $dataFiles
 [IO.File]::WriteAllText((Join-Path $data 'hanlin-data.revision'), $revision)
@@ -172,7 +163,7 @@ if (-not $iscc) {
                     "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
     $iscc = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 }
-if (-not $iscc) { throw '找不到 ISCC.exe，请先安装 Inno Setup 6.3 或更新版本。' }
+if (-not $iscc) { throw '找不到 ISCC.exe，请先安装 Inno Setup 6.6 或更新版本。' }
 
 & $iscc "/DPayloadDir=$payload" "/O$output" $installer
 if ($LASTEXITCODE -ne 0) { throw "安装包编译失败，退出码 $LASTEXITCODE。" }

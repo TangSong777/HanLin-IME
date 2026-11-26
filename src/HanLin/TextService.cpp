@@ -4,6 +4,7 @@
 #include <X11/keysym.h>
 
 #include <algorithm>
+#include <bitset>
 #include <functional>
 #include <mutex>
 #include <new>
@@ -18,6 +19,9 @@ constexpr int kControl = 1 << 2;
 constexpr int kAlt = 1 << 3;
 constexpr int kSuper = 1 << 26;
 constexpr int kRelease = 1 << 30;
+constexpr LPARAM kAltContext = 1L << 29;
+constexpr LPARAM kPreviousKeyState = 1L << 30;
+constexpr ULONGLONG kShiftTapTimeout = 500;
 std::mutex notify_class;
 
 enum class CallResult { Success, SessionRejected, Unavailable };
@@ -87,10 +91,31 @@ bool ContextDisabled(ITfContext* context) {
   return false;
 }
 
-bool IsModifier(UINT key) {
-  return key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT ||
-      key == VK_CONTROL || key == VK_LCONTROL || key == VK_RCONTROL ||
-      key == VK_MENU || key == VK_LMENU || key == VK_RMENU;
+bool IsShiftKey(UINT key) {
+  return key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT;
+}
+
+bool PassToHost(UINT key, int modifiers, bool composing) {
+  switch (key) {
+    case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL:
+    case VK_MENU: case VK_LMENU: case VK_RMENU:
+    case VK_LWIN: case VK_RWIN:
+    case VK_INSERT:
+      return true;
+  }
+  if ((modifiers & (kAlt | kSuper)) || (key >= VK_F1 && key <= VK_F24))
+    return true;
+  // Ctrl+Backspace is an IME editing key only during an active composition.
+  if (modifiers & kControl)
+    return key != VK_BACK || (modifiers & kShift) || !composing;
+  if ((modifiers & kShift) && (key == VK_DELETE || key == VK_SPACE)) return true;
+  switch (key) {
+    case VK_BACK: case VK_TAB: case VK_RETURN: case VK_ESCAPE: case VK_SPACE:
+    case VK_DELETE: case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
+    case VK_HOME: case VK_END: case VK_PRIOR: case VK_NEXT:
+      return !composing;
+  }
+  return false;
 }
 
 int KeySymbol(UINT key, LPARAM data, BYTE* keyboard) {
@@ -102,12 +127,6 @@ int KeySymbol(UINT key, LPARAM data, BYTE* keyboard) {
     case VK_SHIFT: return MapVirtualKeyW(scan, MAPVK_VSC_TO_VK_EX) == VK_RSHIFT ? XK_Shift_R : XK_Shift_L;
     case VK_LSHIFT: return XK_Shift_L;
     case VK_RSHIFT: return XK_Shift_R;
-    case VK_CONTROL: return extended ? XK_Control_R : XK_Control_L;
-    case VK_LCONTROL: return XK_Control_L;
-    case VK_RCONTROL: return XK_Control_R;
-    case VK_MENU: return extended ? XK_Alt_R : XK_Alt_L;
-    case VK_LMENU: return XK_Alt_L;
-    case VK_RMENU: return XK_Alt_R;
     case VK_CAPITAL: return XK_Caps_Lock;
     case VK_ESCAPE: return XK_Escape;
     case VK_RETURN: return extended ? XK_KP_Enter : XK_Return;
@@ -122,7 +141,6 @@ int KeySymbol(UINT key, LPARAM data, BYTE* keyboard) {
     case VK_NEXT: return extended ? XK_Page_Down : XK_KP_Page_Down;
     case VK_HOME: return extended ? XK_Home : XK_KP_Home;
     case VK_END: return extended ? XK_End : XK_KP_End;
-    case VK_INSERT: return extended ? XK_Insert : XK_KP_Insert;
     case VK_DELETE: return extended ? XK_Delete : XK_KP_Delete;
     case VK_CLEAR: return XK_KP_Begin;
     case VK_ADD: return XK_KP_Add;
@@ -132,9 +150,6 @@ int KeySymbol(UINT key, LPARAM data, BYTE* keyboard) {
     case VK_DECIMAL: return XK_KP_Decimal;
     case VK_SEPARATOR: return XK_KP_Separator;
   }
-  // Translate the physical layout with Shift and Caps Lock, retaining Ctrl/Alt as modifiers.
-  keyboard[VK_CONTROL] = keyboard[VK_LCONTROL] = keyboard[VK_RCONTROL] = 0;
-  keyboard[VK_MENU] = keyboard[VK_LMENU] = keyboard[VK_RMENU] = 0;
   wchar_t translated[4]{};
   const auto count = ToUnicodeEx(key, scan, keyboard, translated, 4, 4, GetKeyboardLayout(0));
   if (count != 1 || translated[0] < L' ' || translated[0] == 0x7f) return 0;
@@ -142,18 +157,20 @@ int KeySymbol(UINT key, LPARAM data, BYTE* keyboard) {
   return 0x01000000 | translated[0];
 }
 
-struct Key { int symbol; int modifiers; };
+struct Key { int symbol = 0; int modifiers = 0; };
 
-Key Translate(WPARAM word, LPARAM data, bool release) {
-  BYTE keyboard[256]{};
-  GetKeyboardState(keyboard);
+int KeyModifiers(const BYTE* keyboard, LPARAM data, bool release) {
   int modifiers = release ? kRelease : 0;
-  if (keyboard[VK_SHIFT] & 0x80) modifiers |= kShift;
-  if (keyboard[VK_CONTROL] & 0x80) modifiers |= kControl;
-  if (keyboard[VK_MENU] & 0x80) modifiers |= kAlt;
+  if ((keyboard[VK_SHIFT] | keyboard[VK_LSHIFT] | keyboard[VK_RSHIFT]) & 0x80)
+    modifiers |= kShift;
+  if ((keyboard[VK_CONTROL] | keyboard[VK_LCONTROL] | keyboard[VK_RCONTROL]) & 0x80)
+    modifiers |= kControl;
+  if (((keyboard[VK_MENU] | keyboard[VK_LMENU] | keyboard[VK_RMENU]) & 0x80) ||
+      (data & kAltContext))
+    modifiers |= kAlt;
   if ((keyboard[VK_LWIN] | keyboard[VK_RWIN]) & 0x80) modifiers |= kSuper;
   if (keyboard[VK_CAPITAL] & 1) modifiers |= kCaps;
-  return {KeySymbol(static_cast<UINT>(word), data, keyboard), modifiers};
+  return modifiers;
 }
 
 void MoveSelection(ITfContext* context, ITfRange* range, TfEditCookie cookie,
@@ -385,21 +402,57 @@ class TextService final : public ITfTextInputProcessorEx,
     return manager_ && !(flags_ & TF_TMF_SECUREMODE) && !ContextDisabled(context);
   }
 
+  Key RouteKey(ITfContext* context, WPARAM word, LPARAM data, bool release, bool testing) {
+    const auto vk = static_cast<UINT>(word);
+    const bool shift_key = IsShiftKey(vk);
+    const bool composing = composing_ && context == context_.Get();
+    if (!shift_key && !release) shift_tap_.reset();
+    if (word >= 256 || (!shift_key && release && !composing)) return {};
+
+    BYTE keyboard[256]{};
+    if (!GetKeyboardState(keyboard)) {
+      shift_tap_.reset();
+      return {};
+    }
+    const int modifiers = KeyModifiers(keyboard, data, release);
+    if (shift_key) {
+      const int symbol = KeySymbol(vk, data, keyboard);
+      const auto opposite = symbol == XK_Shift_L ? VK_RSHIFT : VK_LSHIFT;
+      const bool chord = (modifiers & (kControl | kAlt | kSuper)) ||
+          (keyboard[opposite] & 0x80);
+      if (!release) {
+        // TSF may only deliver the preview for a key we leave to the app.
+        // Record the press here and send Shift to Rime only for a real tap.
+        if (chord) shift_tap_.reset();
+        else if (!(data & kPreviousKeyState))
+          shift_tap_ = ShiftTap{context, symbol, GetTickCount64()};
+        return {};
+      }
+      const bool tap = !chord && shift_tap_ && shift_tap_->context == context &&
+          shift_tap_->symbol == symbol && GetTickCount64() - shift_tap_->started < kShiftTapTimeout;
+      if (!testing || !tap) shift_tap_.reset();
+      return tap && TestContext(context) ? Key{symbol, modifiers} : Key{};
+    }
+
+    // Leave key-up with the app even if the shortcut's modifier was released first.
+    const bool host_key = PassToHost(vk, modifiers, composing) ||
+        (shortcut_keys_[vk] && (release || (data & kPreviousKeyState)));
+    if (!release) shortcut_keys_.set(vk, host_key);
+    if (host_key || !TestContext(context)) return {};
+    return {KeySymbol(vk, data, keyboard), modifiers};
+  }
+
   HRESULT TestKey(ITfContext* context, WPARAM key, LPARAM param, bool release, BOOL* eaten) {
     if (!eaten) return E_POINTER;
-    *eaten = FALSE;
-    if (!TestContext(context) || (release && !IsModifier(static_cast<UINT>(key)) && !composing_)) return S_OK;
-    const auto translated = Translate(key, param, release);
-    *eaten = translated.symbol && !(translated.modifiers & kSuper);
+    *eaten = RouteKey(context, key, param, release, true).symbol != 0;
     return S_OK;
   }
 
   HRESULT HandleKey(ITfContext* context, WPARAM word, LPARAM data, bool release, BOOL* eaten) {
     if (!eaten) return E_POINTER;
     *eaten = FALSE;
-    if (!TestContext(context)) return S_OK;
-    const auto key = Translate(word, data, release);
-    if (!key.symbol || (key.modifiers & kSuper)) return S_OK;
+    const auto key = RouteKey(context, word, data, release, false);
+    if (!key.symbol) return S_OK;
     if (context != context_.Get()) AttachContext(context);
     if (!EnsureSession() && pending_commit_.empty()) return S_OK;
     // Only consume the key if TSF grants a synchronous write session.
@@ -409,8 +462,10 @@ class TextService final : public ITfTextInputProcessorEx,
           const auto written = FlushCommit(context, cookie);
           if (FAILED(written)) return written;
           State state;
-          if (!SendInput(Command::Key, {key.symbol, key.modifiers}, state, cookie)) return S_OK;
           const bool shift = key.symbol == XK_Shift_L || key.symbol == XK_Shift_R;
+          if (shift && !SendInput(Command::Key, {key.symbol, (key.modifiers & ~kRelease) | kShift}, state, cookie))
+            return S_OK;
+          if (!SendInput(Command::Key, {key.symbol, key.modifiers}, state, cookie)) return S_OK;
           const bool mode_tip = shift && ascii_ != state.ascii && !state.composing;
           return Accept(context, cookie, std::move(state), eaten, mode_tip);
         });
@@ -665,6 +720,7 @@ class TextService final : public ITfTextInputProcessorEx,
 
   void ResetInput(std::optional<TfEditCookie> cookie = {}) {
     ++generation_;
+    shift_tap_.reset();
     composing_ = false;
     pending_commit_.clear();
     last_placement_.reset();
@@ -777,8 +833,15 @@ class TextService final : public ITfTextInputProcessorEx,
     if (!notify_) UnregisterClassW(kClientWindowClass, module_instance);
   }
 
+  struct ShiftTap {
+    ITfContext* context;
+    int symbol;
+    ULONGLONG started;
+  };
   ComLifetime lifetime_;
   Client transport_;
+  std::optional<ShiftTap> shift_tap_;
+  std::bitset<256> shortcut_keys_;
   std::optional<std::array<int32_t, 6>> last_placement_;
   std::wstring pending_commit_;
   uint64_t token_ = 0;

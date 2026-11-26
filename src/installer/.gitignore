@@ -2,7 +2,7 @@
 #
 # 这里只声明规则，不提交任何二进制或第三方素材：
 #   · payload/ime/      本项目编译的三个文件，从 src/dist 取
-#   · payload/skin/     搜狗 Color-P 皮肤，从本机已部署的皮肤目录取
+#   · payload/skin/     历史本机皮肤暂存目录
 #   · payload/updater/  WinSparkle，从已装的小狼毫目录取
 #   · payload/rime-data/ 雾凇拼音数据，从本机 Rime 用户目录取
 #

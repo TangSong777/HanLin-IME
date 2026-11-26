@@ -16,6 +16,7 @@ namespace HanLin.Tools
         internal static readonly Color Accent = ColorFor("#E48887", SystemColors.Highlight);
         internal static readonly Color AccentInk = ColorFor("#000000", SystemColors.HighlightText);
         internal static readonly Color AccentHover = ColorFor("#D58180", SystemColors.Highlight);
+        internal static readonly Color AccentPressed = ColorFor("#CC7D7C", SystemColors.Highlight);
         internal static readonly Color Tint = ColorFor("#FCEEEB", SystemColors.Window);
         internal static readonly Color Hover = ColorFor("#F9E0DE", SystemColors.Highlight);
         internal static readonly Color Press = ColorFor("#F5D1CF", SystemColors.Highlight);
@@ -190,13 +191,13 @@ namespace HanLin.Tools
             var bounds = new Rectangle(inset, 1, Width - 1 - 2 * inset, Height - 3);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
             Color normal = Parent == null ? Theme.Paper : Parent.BackColor;
-            Color background = !Enabled ? normal : primary ? (hover || pressed ? Theme.AccentHover : Theme.Accent)
+            Color background = !Enabled ? normal : primary ? (pressed ? Theme.AccentPressed : hover ? Theme.AccentHover : Theme.Accent)
                 : pressed ? Theme.Press : hover ? Theme.Hover : normal;
             Color ink = !Enabled ? Theme.Muted : primary || (SystemInformation.HighContrast && (hover || pressed))
                 ? Theme.AccentInk : Theme.Ink;
             using (var path = Theme.Rounded(bounds, Theme.Scale(menu ? 5 : 7, DeviceDpi)))
             using (var fill = new SolidBrush(background))
-            using (var stroke = new Pen(Focused ? Theme.Accent : Theme.Edge))
+            using (var stroke = new Pen(Focused ? Theme.Alert : Theme.Edge))
             {
                 graphics.FillPath(fill, path);
                 if (Focused || (!primary && !menu && Enabled)) graphics.DrawPath(stroke, path);
@@ -245,9 +246,11 @@ namespace HanLin.Tools
     internal class HanLinForm : Form
     {
         internal readonly Panel Body;
+        private readonly int cornerRadius;
 
         internal HanLinForm(string caption, Size size, bool popup = false)
         {
+            cornerRadius = popup ? 8 : 10;
             Text = caption;
             Font = Theme.Body;
             BackColor = Theme.Paper;
@@ -267,15 +270,15 @@ namespace HanLin.Tools
             {
                 var title = new TitleStrip {
                     ColumnCount = 3, RowCount = 1, Dock = DockStyle.Top, Height = 46,
-                    BackColor = Theme.Paper, Padding = new Padding(12, 3, 6, 3)
+                    BackColor = Theme.Paper, Padding = new Padding(18, 0, 10, 0)
                 };
                 title.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 34));
                 title.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
                 title.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
                 title.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
                 var mark = new PictureBox {
-                    Image = Icon == null ? null : Icon.ToBitmap(), Dock = DockStyle.Fill,
-                    SizeMode = PictureBoxSizeMode.Zoom, Margin = new Padding(3, 5, 5, 5)
+                    Image = Icon == null ? null : Icon.ToBitmap(), Anchor = AnchorStyles.Left,
+                    Width = 26, Height = 26, SizeMode = PictureBoxSizeMode.Zoom, Margin = Padding.Empty
                 };
                 var label = Theme.Label(caption, Theme.Heading);
                 var close = new InkButton("×") { AccessibleName = "关闭", DialogResult = DialogResult.Cancel };
@@ -301,7 +304,7 @@ namespace HanLin.Tools
         {
             base.OnResize(e);
             if (Width <= 1 || Height <= 1) return;
-            using (var curve = Theme.Rounded(ClientRectangle, Theme.Scale(8, DeviceDpi)))
+            using (var curve = Theme.Rounded(ClientRectangle, Theme.Scale(cornerRadius, DeviceDpi)))
             {
                 var old = Region;
                 Region = new Region(curve);
@@ -314,7 +317,7 @@ namespace HanLin.Tools
             base.OnPaint(e);
             if (Width <= 1 || Height <= 1) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var curve = Theme.Rounded(new Rectangle(0, 0, Width - 1, Height - 1), Theme.Scale(8, DeviceDpi)))
+            using (var curve = Theme.Rounded(new Rectangle(0, 0, Width - 1, Height - 1), Theme.Scale(cornerRadius, DeviceDpi)))
             using (var border = new Pen(Theme.Edge))
                 e.Graphics.DrawPath(border, curve);
         }

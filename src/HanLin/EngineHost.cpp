@@ -237,7 +237,7 @@ class EngineHost {
   void AttachWindow(HWND window, HINSTANCE image, const fs::path& directory,
                     const std::wstring& shared, const std::wstring& personal, bool enable_tray) {
     window_ = window;
-    ReadStyle(personal);
+    ReadStyle();
     ui_.InServer() = true;
     ui_.SetUICallBack([this](size_t* select, size_t* highlight, bool* backward, bool* scroll) {
       if (!rendered_menu_revision_) return;
@@ -571,63 +571,50 @@ class EngineHost {
     rendered_menu_revision_ = state.menu_revision;
   }
 
-  void ReadStyle(const std::wstring& personal) {
+  void ReadStyle() {
     auto& style = ui_.style();
-    style.font_face = L"Microsoft YaHei UI";
-    style.font_point = style.comment_font_point = style.label_font_point = 16;
+    const auto color = [](BYTE r, BYTE g, BYTE b) {
+      return static_cast<int>(0xff000000u | RGB(r, g, b));
+    };
+    style.font_face = style.label_font_face = style.comment_font_face = L"Arial,SimSun";
+    // The native renderer takes points. At 96 DPI, 12 pt draws at 16 px.
+    style.font_point = style.comment_font_point = style.label_font_point = 12;
     style.layout_type = weasel::UIStyle::LAYOUT_HORIZONTAL;
     style.label_text_format = L"%s.";
-    style.margin_x = 8;
-    style.margin_y = 5;
-    style.candidate_spacing = 12;
-    style.back_color = static_cast<int>(0xfff8f8f8u);
-    style.text_color = style.candidate_text_color = style.comment_text_color = static_cast<int>(0xff303030u);
-    style.label_text_color = style.candidate_text_color;
-    style.hilited_candidate_back_color = static_cast<int>(0xfff1e3d7u);
-    style.hilited_candidate_text_color = style.hilited_label_text_color = style.hilited_comment_text_color = style.text_color;
-    RimeConfig config{};
-    if (!api_->config_open("hanlin", &config) && !api_->config_open("weasel", &config)) return;
-    auto get = [&](const char* key) { return Wide(api_->config_get_cstring(&config, key)); };
-    auto flag = [&](const char* key, bool& value) {
-      Bool configured = value;
-      if (api_->config_get_bool(&config, key, &configured)) value = configured != 0;
-    };
-    flag("global_ascii", global_ascii_);
-    flag("style/inline_preedit", style.inline_preedit);
-    flag("style/ssf_enabled", style.ssf_enabled);
-    flag("style/ssf_status_bar", style.ssf_status_bar);
-    auto horizontal = true;
-    flag("style/horizontal", horizontal);
-    if (!horizontal) style.layout_type = weasel::UIStyle::LAYOUT_VERTICAL;
-    style.ssf_skin = get("style/ssf_skin");
+    style.margin_x = 10;
+    style.margin_y = 8;
+    style.spacing = 7;
+    style.candidate_spacing = 16;
+    style.hilite_spacing = 4;
+    style.hilite_padding_x = 5;
+    style.hilite_padding_y = 3;
+    style.border = 1;
+    style.round_corner = 5;
+    style.round_corner_ex = 8;
+    style.back_color = color(255, 252, 249);
+    style.border_color = color(226, 223, 221);
+    style.text_color = style.candidate_text_color = color(60, 60, 60);
+    style.label_text_color = style.comment_text_color = color(115, 100, 96);
+    style.hilited_back_color = style.hilited_candidate_back_color = color(252, 238, 235);
+    style.hilited_text_color = style.hilited_candidate_text_color = color(147, 68, 77);
+    style.hilited_label_text_color = style.hilited_comment_text_color = style.hilited_text_color;
+    style.prevpage_color = style.nextpage_color = style.label_text_color;
+
     const auto program_data = KnownDirectory(FOLDERID_ProgramData);
     if (!program_data.empty()) {
-      const auto old_skin = program_data / L"ColorPWeasel" / L"Color-P";
-      if (_wcsicmp(fs::path(style.ssf_skin).lexically_normal().c_str(), old_skin.c_str()) == 0)
-        style.ssf_skin.clear();
-    }
-    if (style.ssf_skin.empty() && style.ssf_enabled) {
-      if (!program_data.empty()) style.ssf_skin = (program_data / L"HanLin" / L"Skin").wstring();
-    } else if (!style.ssf_skin.empty() && std::filesystem::path(style.ssf_skin).is_relative()) {
-      style.ssf_skin = (std::filesystem::path(personal) / style.ssf_skin).wstring();
-    }
-    if (style.ssf_enabled) {
+      const auto directory = program_data / L"HanLin" / L"Skin";
       std::error_code error;
-      style.ssf_enabled = !style.ssf_skin.empty() &&
-          std::filesystem::is_regular_file(std::filesystem::path(style.ssf_skin) / L"skin.ini", error);
+      if (fs::is_regular_file(directory / L"skin.ini", error)) {
+        style.ssf_enabled = true;
+        style.ssf_skin = directory.wstring();
+      }
     }
-    for (const auto& setting : {std::pair{"style/font_face", &style.font_face},
-         {"style/label_font_face", &style.label_font_face}, {"style/comment_font_face", &style.comment_font_face},
-         {"style/label_format", &style.label_text_format}}) {
-      auto value = get(setting.first);
-      if (!value.empty()) *setting.second = std::move(value);
-    }
-    for (const auto& setting : {std::pair{"style/font_point", &style.font_point},
-         {"style/label_font_point", &style.label_font_point}, {"style/comment_font_point", &style.comment_font_point},
-         {"style/layout/margin_x", &style.margin_x}, {"style/layout/margin_y", &style.margin_y},
-         {"style/layout/candidate_spacing", &style.candidate_spacing}, {"style/layout/hilite_padding_x", &style.hilite_padding_x},
-         {"style/layout/hilite_padding_y", &style.hilite_padding_y}})
-      api_->config_get_int(&config, setting.first, setting.second);
+
+    RimeConfig config{};
+    if (!api_->config_open("hanlin", &config) && !api_->config_open("weasel", &config)) return;
+    Bool global_ascii = global_ascii_;
+    if (api_->config_get_bool(&config, "global_ascii", &global_ascii))
+      global_ascii_ = global_ascii != 0;
     api_->config_close(&config);
   }
 
@@ -772,6 +759,19 @@ int RunHost(HINSTANCE image) {
     LocalFree(args);
     State state;
     return Client().Call({kProtocolVersion, Command::Health, 0, {}}, state) && state.handled ? 0 : 1;
+  }
+  if (count == 3 && std::wstring_view(args[1]) == L"--compile-package-data") {
+    const fs::path profile(args[2]);
+    LocalFree(args);
+    // Package compilation has its own empty profile and never enters the desktop host or its mutex.
+    std::error_code error;
+    if (!profile.is_absolute() || !fs::is_directory(shared, error) ||
+        !fs::create_directory(profile, error))
+      return 2;
+    const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const auto result = RunEngine(image, directory, shared, profile.wstring(), true, false);
+    if (SUCCEEDED(initialized)) CoUninitialize();
+    return result;
   }
   bool stop = false;
   bool deploy = false;
