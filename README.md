@@ -1,12 +1,19 @@
 # 寒淋输入法 · HanLin-IME
 
-寒淋输入法使用自研 Windows TSF 文本服务，以 librime 1.17.0 为引擎，默认启用雾凇拼音。支持数字和符号混合造句、拼音纠错与逐字学词，候选窗沿用项目的 SSF 渲染层。
+<img src="docs/icon.png" width="72" height="72" alt="寒淋输入法的「淋」字图标">
+
+一个 Windows 本地输入法：**数据全在本机，不需要账号，不联网**。
+
+寒淋输入法使用自研 Windows TSF 文本服务，以 librime 1.17.0 为引擎，默认启用雾凇拼音。支持数字和符号混合造句、拼音纠错与逐字学词，候选窗沿用项目的 SSF 渲染层。界面采用 HanLin 系列的暖白、珊瑚红配色。[HanLin 系列设计规范](docs/HANLIN-SERIES.md)
+
+> 本项目基于上游开源项目二次开发，不是任何上游项目的官方版本。
 
 | | |
 |---|---|
 | 版本 | `1.2.0` |
+| 运行环境 | Windows 10 / 11 x64 |
 | 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
-| 安装包 | `HanLin-Setup-<版本>.exe`，适用于 x64 Windows |
+| 安装包 | `HanLin-Setup-<版本>.exe` |
 | 许可证 | GPL-3.0（代码）· 界面与候选窗由 HanLin 项目自行设计 |
 
 ## 目录
