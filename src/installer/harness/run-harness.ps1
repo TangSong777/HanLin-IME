@@ -18,11 +18,13 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$WorkRoot = 'C:\ColorP-harness'
+  [string]$WorkRoot = (Join-Path ([IO.Path]::GetTempPath()) ("HanLin-Installer-Harness-" + [guid]::NewGuid().ToString('N')))
 )
 
 $ErrorActionPreference = 'Stop'
 $Here = $PSScriptRoot
+$WorkRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkRoot)
+if (Test-Path -LiteralPath $WorkRoot) { throw "测试目录必须是新目录：$WorkRoot" }
 
 # 装置里的路径是编译期 #define，用 /D 覆盖成调用方指定的位置
 # ISCC.exe 查找：注册表（官方安装器写的 InstallLocation）→ PATH → 常见目录。
@@ -60,7 +62,6 @@ $exe = Join-Path $Here 'output\SSF-Harness.exe'
 if (-not (Test-Path $exe)) { Write-Error "找不到装置 $exe"; exit 2 }
 
 Write-Host "== 运行（工作目录 $WorkRoot）==" -ForegroundColor Cyan
-if (Test-Path $WorkRoot) { Remove-Item $WorkRoot -Recurse -Force }
 
 $p = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
      -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'

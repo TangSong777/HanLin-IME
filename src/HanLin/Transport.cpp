@@ -275,7 +275,7 @@ void Client::WakeIfMissing() const {
 
 bool Client::Call(const Request& request, State& result, bool wake_host) const {
   if (endpoint_.empty()) return false;
-  const auto timeout = request.command == Command::Open ? kOpenTimeout : kKeyTimeout;
+  const auto timeout = request.command == Command::Open && wake_host ? kOpenTimeout : kKeyTimeout;
   const auto connect = [&] {
     return CreateFileW(endpoint_.c_str(), kClientAccess, 0, nullptr, OPEN_EXISTING,
                        FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);

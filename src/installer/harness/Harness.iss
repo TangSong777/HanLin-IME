@@ -16,7 +16,7 @@
 ; 还不能展开（会在运行时报 “attempted to expand the app constant before it
 ; was initialized”）。可在编译时用 /DHarnessRoot=... 覆盖。
 #ifndef HarnessRoot
-  #define HarnessRoot "C:\ColorP-harness"
+  #define HarnessRoot "C:\HanLin-Installer-Harness"
 #endif
 
 [Setup]
@@ -214,7 +214,7 @@ begin
   PassCount := 0;
   FailCount := 0;
   RimeUserDir := ExpandConstant('{#HarnessRoot}\rimeuser');
-  SkinRoot := 'C:\ProgramData\ColorPWeasel\Color-P';
+  SkinRoot := 'C:\ProgramData\HanLin\LocalSkin';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -238,7 +238,7 @@ begin
         ok and FileExists(ExpandConstant('{tmp}\empty.yaml')));
 
   // ---- 用例 1：标准输入 ----
-  expectPath := 'style/ssf_skin: ''C:/ProgramData/ColorPWeasel/Color-P''';
+  expectPath := 'style/ssf_skin: ''C:/ProgramData/HanLin/LocalSkin''';
   RunFixture('standard.yaml', '标准输入', expectPath);
 
   outFile := RimeUserDir + '\weasel.custom.yaml';

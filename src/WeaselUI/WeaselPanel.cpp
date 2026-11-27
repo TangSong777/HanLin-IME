@@ -8,9 +8,38 @@
 #include <WeaselIPCData.h>
 #include <HanLinIcons.h>
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <string_view>
 
 namespace {
 constexpr UINT kAvoidCandidateMessage = WM_APP + 0x517;
+constexpr UINT_PTR kHoverTimer = 20261126;
+constexpr UINT_PTR kCaretTimer = 20261127;
+constexpr float kHoverDuration = 130.0f;
+constexpr float kCaretResponseMs = 22.0f;
+constexpr float kCaretSettlePx = 0.125f;
+
+bool SamePreeditIgnoringSpaces(std::wstring_view old_text, std::wstring_view text) {
+  size_t old_index = 0, index = 0;
+  while (true) {
+    while (old_index < old_text.size() && old_text[old_index] == L' ') ++old_index;
+    while (index < text.size() && text[index] == L' ') ++index;
+    if (old_index == old_text.size() || index == text.size())
+      return old_index == old_text.size() && index == text.size();
+    if (old_text[old_index++] != text[index++]) return false;
+  }
+}
+
+int LatinLetterIndex(wchar_t ch) {
+  if (ch >= L'a' && ch <= L'z') return ch - L'a';
+  if (ch >= L'A' && ch <= L'Z') return 26 + ch - L'A';
+  return -1;
+}
+bool ClientMotionEnabled() {
+  BOOL animate = FALSE;
+  return SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0) && animate;
+}
 const wchar_t* kPanelRole = L"WeaselColorPPanelRole";
 BOOL CALLBACK CollectCandidateRects(HWND window, LPARAM param) {
   if (IsWindowVisible(window) &&
@@ -159,6 +188,8 @@ WeaselPanel::~WeaselPanel() {
 
 void WeaselPanel::_ResizeWindow() {
   CSize m_size = m_layout->GetContentSize();
+  CRect client;
+  if (GetClientRect(&client) && client.Size() == m_size) return;
   SetWindowPos(NULL, 0, 0, m_size.cx, m_size.cy,
                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOREDRAW);
 }
@@ -297,6 +328,10 @@ void WeaselPanel::_CreateLayout() {
 
 // 更新界面
 void WeaselPanel::Refresh() {
+  if (m_ctx.preedit.str != m_octx.preedit.str &&
+      (m_ctx.preedit.str.empty() || m_octx.preedit.str.empty() ||
+       !SamePreeditIgnoringSpaces(m_octx.preedit.str, m_ctx.preedit.str)))
+    _ResetCaretMotion();
   if (weasel::ssf::SuppressEmptyWindow(m_style.ssf_enabled, m_ctx.empty(),
                                        m_status.show_mode_tip)) {
     hide_candidates = true;
@@ -311,6 +346,11 @@ void WeaselPanel::Refresh() {
                   : (m_status.ascii_mode || !m_status.composing ||
                      !m_ctx.aux.empty());
   m_candidateCount = min(m_ctx.cinfo.candies.size(), MAX_CANDIDATES_COUNT);
+  if (!std::equal(m_ctx.cinfo.candies.begin(), m_ctx.cinfo.candies.end(),
+                  m_octx.cinfo.candies.begin(), m_octx.cinfo.candies.end(),
+                  [](const auto& a, const auto& b) { return a.str == b.str; })) {
+    _ResetCandidateHover();
+  }
   // When the candidate window changes from having content to having no content,
   // reset the sticky state
   if (m_lastCandidateCount > 0 && m_candidateCount == 0) {
@@ -340,7 +380,7 @@ void WeaselPanel::Refresh() {
   // only RedrawWindow if no need to hide candidates window, or
   // inline_no_candidates
   if (!hide_candidates || inline_no_candidates) {
-    {
+    if (SsfLogEnabled()) {
       wchar_t buf[320];
       swprintf_s<320>(buf, L"refresh: before _InitFontRes skin='%ls' addr=%p",
                       m_style.ssf_skin.c_str(),
@@ -349,7 +389,7 @@ void WeaselPanel::Refresh() {
     }
     _SsfReloadSkin();
     _InitFontRes();
-    {
+    if (SsfLogEnabled()) {
       wchar_t buf[320];
       swprintf_s<320>(buf, L"refresh: after _InitFontRes skin='%ls'",
                       m_style.ssf_skin.c_str());
@@ -385,6 +425,7 @@ void WeaselPanel::_InitFontRes(bool forced) {
   // if style changed, or dpi changed, or pDWR NULL, re-initialize directwrite
   // resources
   if (forced || (pDWR == NULL) || (m_ostyle != m_style) || (dpiX != dpi)) {
+    _ResetCaretMotion();
     pDWR.reset();
     // SSF measures and draws with its own formats, including its GDI fallback.
     pDWR = std::make_shared<DirectWriteResources>(m_style, dpiX, !SsfActive());
@@ -661,7 +702,7 @@ LRESULT WeaselPanel::OnMouseMove(UINT uMsg,
                                  WPARAM wParam,
                                  LPARAM lParam,
                                  BOOL& bHandled) {
-  if (m_style.hover_type == UIStyle::NONE)
+  if (!m_layout || m_style.hover_type == UIStyle::NONE)
     return 0;
   if (m_mouse_entry == false) {
     TRACKMOUSEEVENT tme;
@@ -680,9 +721,7 @@ LRESULT WeaselPanel::OnMouseMove(UINT uMsg,
   // Ignore if mouse screen position not changed
   CPoint ptScreen = point;
   ClientToScreen(&ptScreen);
-  if (ptScreen == m_lastMousePos || m_lastMousePos.x == -1) {
-    if (m_lastMousePos.x == -1)
-      m_lastMousePos = ptScreen;
+  if (ptScreen == m_lastMousePos) {
     return 0;
   }
   m_lastMousePos = ptScreen;
@@ -694,21 +733,16 @@ LRESULT WeaselPanel::OnMouseMove(UINT uMsg,
     rect.InflateRect(DPI_SCALE(m_style.hilite_padding_x),
                      DPI_SCALE(m_style.hilite_padding_y));
     if (rect.PtInRect(point)) {
-      if (i != m_ctx.cinfo.highlighted) {
-        if (m_style.hover_type == UIStyle::HoverType::HILITE) {
-          if (_UICallback)
-            _UICallback(NULL, &i, NULL, NULL);
-        } else if (m_hoverIndex != i) {
-          m_hoverIndex = static_cast<int>(i);
-          InvalidateRect(&rcw, true);
-        }
-      } else if (m_style.hover_type == UIStyle::HoverType::SEMI_HILITE &&
-                 m_hoverIndex != -1) {
-        m_hoverIndex = -1;
-        InvalidateRect(&rcw, true);
+      if (m_style.hover_type == UIStyle::HoverType::HILITE) {
+        if (i != m_ctx.cinfo.highlighted && _UICallback)
+          _UICallback(NULL, &i, NULL, NULL);
+      } else {
+        _SetCandidateHover(static_cast<int>(i));
       }
+      return 0;
     }
   }
+  _SetCandidateHover(-1);
   return 0;
 }
 
@@ -716,10 +750,151 @@ LRESULT WeaselPanel::OnMouseLeave(UINT uMsg,
                                   WPARAM wParam,
                                   LPARAM lParam,
                                   BOOL& bHandled) {
-  m_hoverIndex = -1;
-  InvalidateRect(&rcw, true);
+  _SetCandidateHover(-1);
+  m_lastMousePos = {-1, -1};
   m_mouse_entry = false;
   return 0;
+}
+
+void WeaselPanel::_SetCandidateHover(int index) {
+  if (index == hover_target_) return;
+  hover_target_ = index;
+  hover_starts_ = hover_amounts_;
+  hover_start_tick_ = GetTickCount64();
+  if (!ClientMotionEnabled() || !::SetTimer(m_hWnd, kHoverTimer, 16, nullptr)) {
+    ::KillTimer(m_hWnd, kHoverTimer);
+    hover_amounts_.fill(0);
+    if (index >= 0) hover_amounts_[index] = 1.0f;
+  }
+  RedrawWindow();
+}
+
+void WeaselPanel::_ResetCandidateHover() {
+  ::KillTimer(m_hWnd, kHoverTimer);
+  hover_target_ = -1;
+  hover_amounts_.fill(0);
+  m_lastMousePos = {-1, -1};
+}
+
+static float CandidateInkCenterY(const CRect& text, IDWriteTextLayout* layout,
+                                 bool vertical = false) {
+  DWRITE_OVERHANG_METRICS ink = {};
+  if (layout && SUCCEEDED(layout->GetOverhangMetrics(&ink))) {
+    const float offset_y = vertical ? (std::max)(0.0f, ink.top) : 0.0f;
+    const float top = -ink.top;
+    const float bottom = layout->GetMaxHeight() + ink.bottom;
+    if (bottom > top) return text.top + offset_y + (top + bottom) * 0.5f;
+  }
+  return (text.top + text.bottom) * 0.5f;
+}
+
+void WeaselPanel::_DrawCandidateHover(CRect bounds, float text_center_y,
+                                      float amount, bool selected) {
+  if (amount <= 0.002f || !pDWR->pBrush) return;
+  CRect inset = rcw;
+  inset.DeflateRect((std::max)(2, DPI_SCALE(2)), (std::max)(3, DPI_SCALE(3)));
+  const LONG left = (std::max)(bounds.left, inset.left);
+  const LONG right = (std::min)(bounds.right, inset.right);
+  // Keep the upper and lower padding equal even near the window edge.
+  const float half_height = (std::min)({(bounds.Height() - 1.0f) * 0.5f,
+      text_center_y - inset.top - 0.5f, inset.bottom - 0.5f - text_center_y});
+  if (right - left <= 1 || half_height <= 0.0f) return;
+  const float radius = (std::min)(5.0f * dpiScaleLayout, half_height);
+  const auto shape = D2D1::RoundedRect(D2D1::RectF(
+      left + 0.5f, text_center_y - half_height,
+      right - 0.5f, text_center_y + half_height), radius, radius);
+  pDWR->SetBrushColor(D2D1::ColorF(0xE48887, amount * (selected ? 0.30f : 0.19f)));
+  pDWR->pRenderTarget->FillRoundedRectangle(shape, pDWR->pBrush.Get());
+  pDWR->SetBrushColor(D2D1::ColorF(0xD58180, amount * (selected ? 0.74f : 0.52f)));
+  pDWR->pRenderTarget->DrawRoundedRectangle(shape, pDWR->pBrush.Get(), (std::max)(1.0f, dpiScaleLayout));
+}
+
+void WeaselPanel::_ResetCaretMotion() {
+  ::KillTimer(m_hWnd, kCaretTimer);
+  caret_motion_start_ = 0;
+  caret_positioned_ = false;
+}
+
+float WeaselPanel::_CaretPosition(ULONGLONG now) const {
+  if (!caret_motion_start_) return caret_target_;
+  const float elapsed = static_cast<float>(now - caret_motion_start_);
+  return caret_target_ + (caret_from_ - caret_target_) * std::exp(-elapsed / kCaretResponseMs);
+}
+
+WeaselPanel::CaretSideBearings WeaselPanel::_MeasureCaretSideBearings(
+    wchar_t letter, IDWriteTextFormat* format) {
+  const int index = LatinLetterIndex(letter);
+  if (index < 0 || !format) return {};
+  if (caret_spacing_format_.Get() != format) {
+    caret_spacing_format_ = format;
+    caret_spacing_.fill({});
+  }
+  auto& spacing = caret_spacing_[index];
+  if (spacing.measured) return spacing;
+  spacing.measured = true;
+  constexpr float measure_space = 4096.0f;
+  ComPtr<IDWriteTextLayout> letter_layout;
+  if (FAILED(pDWR->pDWFactory->CreateTextLayout(&letter, 1, format, measure_space,
+                                                measure_space, letter_layout.GetAddressOf())))
+    return spacing;
+  letter_layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+  letter_layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+  DWRITE_TEXT_METRICS metrics = {};
+  DWRITE_OVERHANG_METRICS ink = {};
+  if (SUCCEEDED(letter_layout->GetMetrics(&metrics)) &&
+      SUCCEEDED(letter_layout->GetOverhangMetrics(&ink))) {
+    spacing.leading = -ink.left;
+    spacing.trailing = metrics.widthIncludingTrailingWhitespace - (measure_space + ink.right);
+  }
+  return spacing;
+}
+
+float WeaselPanel::_BalanceCaretGap(IDWriteTextLayout* layout, IDWriteTextFormat* format,
+                                     const std::wstring& text, UINT32 cursor,
+                                     float x, float y, const DWRITE_HIT_TEST_METRICS& hit) {
+  if (cursor == 0 || cursor >= text.size() || hit.length != 1 || hit.textPosition != cursor ||
+      hit.bidiLevel != 0 || LatinLetterIndex(text[cursor - 1]) < 0 ||
+      LatinLetterIndex(text[cursor]) < 0)
+    return x;
+  float left_stop = 0, left_y = 0;
+  DWRITE_HIT_TEST_METRICS left = {};
+  if (FAILED(layout->HitTestTextPosition(cursor - 1, TRUE, &left_stop, &left_y, &left)) ||
+      left_y != y || left.length != 1 || left.textPosition != cursor - 1 || left.bidiLevel != 0)
+    return x;
+  // Centre on the visible gap rather than the boundary of the advance boxes.
+  const float left_ink = left_stop - _MeasureCaretSideBearings(text[cursor - 1], format).trailing;
+  const float right_ink = x + _MeasureCaretSideBearings(text[cursor], format).leading;
+  return right_ink > left_ink
+      ? x + std::clamp((left_ink + right_ink) * 0.5f - x, -dpiScaleLayout, dpiScaleLayout)
+      : x;
+}
+
+void WeaselPanel::_DrawCaret(float x, float top, float bottom, const D2D1_COLOR_F& color) {
+  const float width = (std::max)(1.0f, dpiScaleLayout);
+  if (bottom <= top || rcw.Width() < width) return;
+  const float half_width = width * 0.5f;
+  x = std::clamp(x, half_width, rcw.Width() - half_width);
+  const auto now = GetTickCount64();
+  if (!caret_positioned_ || x != caret_target_) {
+    const bool in_motion = caret_motion_start_ != 0;
+    const float from = _CaretPosition(now);
+    const bool animate = caret_positioned_ && IsWindowVisible() && ClientMotionEnabled() &&
+                         std::abs(x - from) > kCaretSettlePx;
+    caret_positioned_ = true;
+    caret_from_ = from;
+    caret_target_ = x;
+    // Keep the timer cadence when key repeats retarget the in-flight caret.
+    caret_motion_start_ = animate && (in_motion || ::SetTimer(m_hWnd, kCaretTimer, 16, nullptr)) ? now : 0;
+    if (!caret_motion_start_ && in_motion) ::KillTimer(m_hWnd, kCaretTimer);
+  }
+  const float left = _CaretPosition(now) - half_width;
+  const float height = (bottom - top) * 0.72f;
+  const float center = (top + bottom) * 0.5f;
+  const float radius = width * 0.5f;
+  pDWR->SetBrushColor(color);
+  pDWR->pRenderTarget->FillRoundedRectangle(
+      D2D1::RoundedRect(D2D1::RectF(left, center - height * 0.5f, left + width, center + height * 0.5f),
+                        radius, radius), pDWR->pBrush.Get());
 }
 
 void WeaselPanel::_HighlightText(CDCHandle& dc,
@@ -1001,7 +1176,7 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
     // if candidate_shadow_color not transparent, draw candidate shadow first
     if (COLORNOTTRANSPARENT(m_style.candidate_shadow_color)) {
       for (auto i = 0; i < m_candidateCount && i < MAX_CANDIDATES_COUNT; ++i) {
-        if (i == m_ctx.cinfo.highlighted || i == m_hoverIndex)
+        if (i == m_ctx.cinfo.highlighted)
           continue;  // draw non hilited candidates only
         rect = m_layout->GetCandidateRect((int)i);
         IsToRoundStruct rd = m_layout->GetRoundInfo(i);
@@ -1020,7 +1195,7 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
     if ((COLORNOTTRANSPARENT(m_style.candidate_back_color) ||
          COLORNOTTRANSPARENT(m_style.candidate_border_color))) {
       for (auto i = 0; i < m_candidateCount && i < MAX_CANDIDATES_COUNT; ++i) {
-        if (i == m_ctx.cinfo.highlighted || i == m_hoverIndex)
+        if (i == m_ctx.cinfo.highlighted)
           continue;
         rect = m_layout->GetCandidateRect((int)i);
         IsToRoundStruct rd = m_layout->GetRoundInfo(i);
@@ -1035,22 +1210,6 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
                        m_style.candidate_border_color);
         drawn = true;
       }
-    }
-    // draw semi-hilite background and shadow
-    if (m_hoverIndex >= 0) {
-      rect = m_layout->GetCandidateRect(m_hoverIndex);
-      IsToRoundStruct rd = m_layout->GetRoundInfo(m_hoverIndex);
-      if (m_istorepos) {
-        rect.OffsetRect(0, m_offsetys[m_hoverIndex]);
-        ReconfigRoundInfo(rd, m_hoverIndex, m_candidateCount);
-      }
-      rect.InflateRect(DPI_SCALE(m_style.hilite_padding_x),
-                       DPI_SCALE(m_style.hilite_padding_y));
-      _HighlightText(dc, rect,
-                     HALF_ALPHA_COLOR(m_style.hilited_candidate_back_color),
-                     HALF_ALPHA_COLOR(m_style.hilited_candidate_shadow_color),
-                     DPI_SCALE(m_style.round_corner), bkType, rd,
-                     HALF_ALPHA_COLOR(m_style.hilited_candidate_border_color));
     }
     // draw highlighted background and shadow
     {
@@ -1104,10 +1263,38 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
   }
   // draw text with direct write
   else {
+    for (int i = 0; i < m_candidateCount; ++i) {
+      if (hover_amounts_[i] <= 0.002f) continue;
+      auto cell = m_layout->GetCandidateRect(i);
+      auto text = m_layout->GetCandidateTextRect(i);
+      if (m_istorepos) {
+        cell.OffsetRect(0, m_offsetys[i]);
+        text.OffsetRect(0, m_offsetys[i]);
+      }
+      cell.InflateRect(DPI_SCALE(3), DPI_SCALE(1));
+      const auto& word = candidates.at(i).str;
+      float center_y = (cell.top + cell.bottom) * 0.5f;
+      if (txtFormat && !text.IsRectEmpty() && !word.empty() &&
+          SUCCEEDED(pDWR->CreateTextLayout(word, static_cast<int>(word.size()), txtFormat.Get(),
+                                          static_cast<float>(text.Width()),
+                                          static_cast<float>(text.Height())))) {
+        const bool vertical = m_style.layout_type == UIStyle::LAYOUT_VERTICAL_TEXT;
+        if (vertical) {
+          pDWR->SetLayoutReadingDirection(DWRITE_READING_DIRECTION_TOP_TO_BOTTOM);
+          pDWR->SetLayoutFlowDirection(m_style.vertical_text_left_to_right
+              ? DWRITE_FLOW_DIRECTION_LEFT_TO_RIGHT
+              : DWRITE_FLOW_DIRECTION_RIGHT_TO_LEFT);
+        }
+        center_y = CandidateInkCenterY(text, pDWR->pTextLayout.Get(), vertical);
+        // Stock horizontal glyphs are hinted one DIP above the layout ink center.
+        if (!vertical) center_y -= dpiScaleLayout;
+      }
+      _DrawCandidateHover(cell, center_y, hover_amounts_[i], i == m_ctx.cinfo.highlighted);
+    }
     // begin draw candidate texts
     int label_text_color, candidate_text_color, comment_text_color;
     for (auto i = 0; i < m_candidateCount && i < MAX_CANDIDATES_COUNT; ++i) {
-      if (i == m_ctx.cinfo.highlighted || i == m_hoverIndex) {
+      if (i == m_ctx.cinfo.highlighted) {
         label_text_color = m_style.hilited_label_text_color;
         candidate_text_color = m_style.hilited_candidate_text_color;
         comment_text_color = m_style.hilited_comment_text_color;
@@ -1224,12 +1411,15 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
     _SsfDoPaint(dc);
     return;
   }
-  // prepare memDC
-  CDCHandle hdc = ::GetDC(m_hWnd);
-  CDCHandle memDC = ::CreateCompatibleDC(hdc);
-  HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, rcw.Width(), rcw.Height());
-  ::SelectObject(memDC, memBitmap);
-  ReleaseDC(hdc);
+  const int width = rcw.Width();
+  const int height = rcw.Height();
+  if (width <= 0 || height <= 0) return;
+  // Keep a scratch surface between frames. Round the capacity up to avoid
+  // reallocating every time a candidate or the preedit changes by a few pixels.
+  if (!stock_dib_.Ensure((width + 31) & ~31, (height + 15) & ~15)) return;
+  std::memset(stock_dib_.bits, 0,
+              static_cast<size_t>(stock_dib_.width) * stock_dib_.height * 4);
+  CDCHandle memDC = stock_dib_.dc;
   bool drawn = false;
   if (!hide_candidates) {
     CRect auxrc = m_layout->GetAuxiliaryRect();
@@ -1304,12 +1494,40 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
     // draw preedit string
     if (!m_layout->IsInlinePreedit() && !m_ctx.preedit.str.empty())
       drawn |= _DrawPreedit(m_ctx.preedit, memDC, preeditrc);
+    if (!m_layout->IsInlinePreedit() &&
+        m_style.layout_type != UIStyle::LAYOUT_VERTICAL_TEXT && !m_ctx.preedit.str.empty()) {
+      int cursor = -1;
+      for (const auto& attr : m_ctx.preedit.attributes)
+        if (attr.range.cursor >= 0) cursor = attr.range.cursor;
+      const auto& text = m_ctx.preedit.str;
+      if (cursor >= 0 && pDWR->pPreeditTextFormat && pDWR->pBrush &&
+          SUCCEEDED(pDWR->CreateTextLayout(text.c_str(), static_cast<int>(text.size()),
+            pDWR->pPreeditTextFormat.Get(), static_cast<float>(preeditrc.Width()),
+            static_cast<float>(preeditrc.Height()))) && pDWR->pTextLayout) {
+        float x = 0, y = 0;
+        DWRITE_HIT_TEST_METRICS hit = {};
+        const UINT32 stop = (std::min)(static_cast<UINT32>(cursor), static_cast<UINT32>(text.size()));
+        if (SUCCEEDED(pDWR->pTextLayout->HitTestTextPosition(stop, FALSE, &x, &y, &hit))) {
+          x = _BalanceCaretGap(pDWR->pTextLayout.Get(), pDWR->pPreeditTextFormat.Get(),
+                               text, stop, x, y, hit);
+          DWRITE_OVERHANG_METRICS overhang = {};
+          pDWR->pTextLayout->GetOverhangMetrics(&overhang);
+          x += preeditrc.left + (std::max)(0.0f, overhang.left);
+          const float top = preeditrc.top + y;
+          const auto ink = m_style.hilited_candidate_text_color;
+          _DrawCaret(x, top, top + hit.height,
+                    D2D1::ColorF(GetRValue(ink) / 255.0f, GetGValue(ink) / 255.0f,
+                                 GetBValue(ink) / 255.0f, 1.0f));
+        }
+      }
+    }
     // draw candidates string
     if (m_candidateCount)
       drawn |= _DrawCandidates(memDC);
     if (FAILED(pDWR->pRenderTarget->EndDraw())) {
       _InitFontRes(true);
-      Refresh();
+      // Keep the last good frame while the device is being recreated.
+      return;
     }
     // end texts drawing
 
@@ -1377,18 +1595,12 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
       ShowWindow(SW_HIDE);
   }
   _LayerUpdate(rcw, memDC);
-
-  // clean objs
-  ::DeleteDC(memDC);
-  ::DeleteObject(memBitmap);
 }
 
 // 由于某些软件并不依赖 WM_PAINT 消息来重绘，在消息循环中直接忽略掉了 WM_PAINT
 // 消息， 导致 DoPaint() 永远不会被调用，这里手动调用 DoPaint() 强制重绘
 void WeaselPanel::RedrawWindow() {
-  HDC hdc = GetDC();
-  DoPaint(hdc);
-  ReleaseDC(hdc);
+  DoPaint(nullptr);
 }
 
 bool WeaselPanel::_LayerUpdate(const CRect& rc, CDCHandle dc) {
@@ -1414,11 +1626,14 @@ LRESULT WeaselPanel::OnCreate(UINT uMsg,
                               LPARAM lParam,
                               BOOL& bHandled) {
   m_mouse_entry = false;
+#ifdef HANLIN_PANEL
+  // Receive candidate hover and clicks without taking focus from the editor.
+  EnableWindow(TRUE);
+#endif
   // The candidate DLL can be in a lower-integrity app than the server.
   // This notification carries no pointers or data; it only requests a scan.
   ChangeWindowMessageFilterEx(m_hWnd, kAvoidCandidateMessage, MSGFLT_ALLOW,
                               nullptr);
-  m_hoverIndex = -1;
   Refresh();
   return TRUE;
 }
@@ -1427,7 +1642,9 @@ LRESULT WeaselPanel::OnDestroy(UINT uMsg,
                                WPARAM wParam,
                                LPARAM lParam,
                                BOOL& bHandled) {
-  m_hoverIndex = -1;
+  _ResetCandidateHover();
+  _ResetCaretMotion();
+  stock_dib_.Clear();
   RemovePropW(m_hWnd, kPanelRole);
   m_lastMousePos = {-1, -1};
   m_sticky = false;
@@ -1461,7 +1678,29 @@ LRESULT WeaselPanel::OnTimerMessage(UINT uMsg,
                                     WPARAM wParam,
                                     LPARAM lParam,
                                     BOOL& bHandled) {
-  bHandled = false;
+  if (wParam == kCaretTimer) {
+    if (!caret_motion_start_ || !IsWindowVisible()) {
+      _ResetCaretMotion();
+      return 0;
+    }
+    if (std::abs(_CaretPosition(GetTickCount64()) - caret_target_) <= kCaretSettlePx) {
+      ::KillTimer(m_hWnd, kCaretTimer);
+      caret_motion_start_ = 0;
+    }
+    RedrawWindow();
+  } else if (wParam == kHoverTimer) {
+    if (!IsWindowVisible()) return 0;
+    const float t = (std::min)(1.0f, (GetTickCount64() - hover_start_tick_) / kHoverDuration);
+    const float rest = 1.0f - t;
+    for (int i = 0; i < m_candidateCount; ++i) {
+      const float target = i == hover_target_ ? 1.0f : 0.0f;
+      hover_amounts_[i] = target + (hover_starts_[i] - target) * rest * rest * rest;
+    }
+    if (t >= 1.0f) ::KillTimer(m_hWnd, kHoverTimer);
+    RedrawWindow();
+  } else {
+    bHandled = false;
+  }
   return 0;
 }
 
@@ -1479,6 +1718,11 @@ LRESULT WeaselPanel::OnAvoidCandidate(UINT, WPARAM, LPARAM, BOOL&) {
 }
 
 LRESULT WeaselPanel::OnPanelShow(UINT, WPARAM shown, LPARAM, BOOL& handled) {
+  if (!shown) {
+    _ResetCaretMotion();
+    _ResetCandidateHover();
+    m_mouse_entry = false;
+  }
   if (GetPropW(m_hWnd, kPanelRole) == reinterpret_cast<HANDLE>(1))
     EnumWindows(NotifyModeTip, 0);
   else if (shown && GetPropW(m_hWnd, kPanelRole) == reinterpret_cast<HANDLE>(2))
@@ -1755,11 +1999,12 @@ std::wstring ResolveUserDataDir() {
 bool WeaselPanel::_SsfReloadSkin() {
   const std::wstring& wanted = m_style.ssf_skin;
 
-  // Log the decision inputs unconditionally at the point where the branch is
-  // taken: if the skin does not apply, this is the first thing worth knowing.
-  // The address of the style this panel reads is included so that a mismatch
-  // with the style the handler wrote is immediately visible.
-  {
+  // Log the decision inputs at the point where the branch is taken: if the skin
+  // does not apply, this is the first thing worth knowing. The address of the
+  // style this panel reads is included so that a mismatch with the style the
+  // handler wrote is immediately visible. Only format when logging is on: this
+  // runs on every keystroke.
+  if (SsfLogEnabled()) {
     wchar_t buf[512];
     swprintf_s<512>(buf,
                     L"reload: enabled=%d skin='%ls' loaded=%d same=%d "
@@ -2078,9 +2323,7 @@ void WeaselPanel::_SsfDrawText(CDCHandle memDC) {
   // Pinyin strip.
   draw(L.pinyin_text, rtext.pinyin, skin.pinyin_color,
        weasel::ssf::ITextMeasurer::PINYIN);
-  // Sogou uses a slim vertical soft cursor in the pinyin strip.  The cursor is
-  // a character index in the UTF-16 preedit supplied by Rime; measuring the
-  // prefix with the same SSF format keeps it aligned with the actual glyphs.
+  // Use the same DirectWrite layout as the preedit text to find the caret.
   const weasel::TextRange preedit_range = ssf_adapter_->GetPreeditRange();
   if (!rtext.pinyin.empty() && !L.pinyin_text.Empty() &&
       preedit_range.cursor >= 0) {
@@ -2089,33 +2332,47 @@ void WeaselPanel::_SsfDrawText(CDCHandle memDC) {
     float caret_advance = 0, caret_y = 0;
     DWRITE_HIT_TEST_METRICS hit = {};
     auto caret_layout = _SsfTextLayout(rtext.pinyin, weasel::ssf::ITextMeasurer::PINYIN);
-    if (!caret_layout || FAILED(caret_layout->HitTestTextPosition(
-        static_cast<UINT32>(cursor), FALSE, &caret_advance, &caret_y, &hit)))
+    if (caret_layout && SUCCEEDED(caret_layout->HitTestTextPosition(
+        static_cast<UINT32>(cursor), FALSE, &caret_advance, &caret_y, &hit))) {
+      caret_advance = _BalanceCaretGap(caret_layout.Get(),
+          ssf_formats_[weasel::ssf::ITextMeasurer::PINYIN].Get(),
+          rtext.pinyin, static_cast<UINT32>(cursor), caret_advance, caret_y, hit);
+    } else {
       caret_advance = static_cast<float>(_SsfMeasure(rtext.pinyin.substr(0, cursor),
           weasel::ssf::ITextMeasurer::PINYIN).cx);
-    const int caret_x = (std::min)(
-        L.pinyin_text.right,
-        L.pinyin_text.left + static_cast<int>(std::round(caret_advance)));
-    const int caret_top = L.pinyin_text.top + 1;
-    const int caret_bottom = (std::max)(caret_top + 1,
-                                        L.pinyin_text.bottom - 1);
-    pDWR->SetBrushColor(ToD2DColor(skin.pinyin_color));
-    pDWR->pRenderTarget->FillRectangle(
-        D2D1::RectF(static_cast<float>(caret_x),
-                    static_cast<float>(caret_top),
-                    static_cast<float>(caret_x + 1),
-                    static_cast<float>(caret_bottom)),
-        pDWR->pBrush.Get());
+    }
+    DWRITE_OVERHANG_METRICS overhang = {};
+    if (caret_layout) caret_layout->GetOverhangMetrics(&overhang);
+    const float x = (std::min)(static_cast<float>(L.pinyin_text.right),
+        L.pinyin_text.left + caret_advance + (std::max)(0.0f, overhang.left));
+    _DrawCaret(x, static_cast<float>(L.pinyin_text.top), static_cast<float>(L.pinyin_text.bottom),
+               ToD2DColor(skin.pinyin_color));
   }
   draw(L.aux_text, rtext.aux, skin.comphint_color,
        weasel::ssf::ITextMeasurer::PINYIN);
 
   // Candidates. The highlighted one uses zhongwen_first_color, the rest
   // zhongwen_color, which is exactly the distinction SSF relies on.
+  for (size_t i = 0; i < L.candidates.size() && i < hover_amounts_.size(); ++i) {
+    if (hover_amounts_[i] <= 0.002f) continue;
+    const auto& candidate = L.candidates[i];
+    const auto& box = candidate.box;
+    CRect cell(box.left - DPI_SCALE(2), box.top + DPI_SCALE(2),
+               box.right + DPI_SCALE(2), box.bottom - DPI_SCALE(2));
+    float center_y = (cell.top + cell.bottom) * 0.5f;
+    if (i < rtext.texts.size() && !rtext.texts[i].empty() && !candidate.text.Empty()) {
+      const auto layout = _SsfTextLayout(rtext.texts[i],
+          static_cast<int>(weasel::ssf::ITextMeasurer::CANDIDATE));
+      const auto& text = candidate.text;
+      center_y = CandidateInkCenterY(
+          CRect(text.left, text.top, text.right, text.bottom), layout.Get());
+    }
+    _DrawCandidateHover(cell, center_y, hover_amounts_[i],
+                        static_cast<int>(i) == rtext.highlighted);
+  }
   for (size_t i = 0; i < L.candidates.size(); ++i) {
     const bool hl = (static_cast<int>(i) == rtext.highlighted);
-    const weasel::ssf::Color& c = hl ? skin.zhongwen_first_color
-                                     : skin.zhongwen_color;
+    const auto& c = hl ? skin.zhongwen_first_color : skin.zhongwen_color;
     if (i < rtext.labels.size())
       draw(L.candidates[i].label, rtext.labels[i], c,
            weasel::ssf::ITextMeasurer::LABEL);
@@ -2170,7 +2427,7 @@ bool WeaselPanel::_SsfDoPaint(CDCHandle dc) {
   const weasel::ssf::SsfLayoutResult& layout = ssf_adapter_->layout();
   const int w = (std::max)(1, layout.window.cx);
   const int h = (std::max)(1, layout.window.cy);
-  {
+  if (SsfLogEnabled()) {
     wchar_t buf[256];
     swprintf_s<256>(buf, L"doPaint: composing SSF surface %dx%d", w, h);
     SSFLOG(buf);

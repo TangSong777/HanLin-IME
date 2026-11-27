@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <WeaselIPCData.h>
 #include <WeaselUI.h>
 #include "StandardLayout.h"
@@ -180,7 +181,7 @@ class WeaselPanel
     }
     ~DibSurface() { Clear(); }
     bool Ensure(int w, int h);
-  } ssf_dib_;
+  } ssf_dib_, stock_dib_;
   std::wstring ssf_loaded_skin_id_;  // style.ssf_skin at load time
   std::wstring ssf_skin_dir_;
   weasel::ssf::SsfRenderer ssf_renderer_;
@@ -237,7 +238,31 @@ class WeaselPanel
       _UICallback;
   float bar_scale_ = 1.0;
   float dpiScaleLayout = 1.0f;
-  int m_hoverIndex = -1;
+  int hover_target_ = -1;
+  std::array<float, MAX_CANDIDATES_COUNT> hover_amounts_{};
+  std::array<float, MAX_CANDIDATES_COUNT> hover_starts_{};
+  ULONGLONG hover_start_tick_ = 0;
+  bool caret_positioned_ = false;
+  float caret_from_ = 0;
+  float caret_target_ = 0;
+  ULONGLONG caret_motion_start_ = 0;
+  struct CaretSideBearings {
+    bool measured = false;
+    float leading = 0;
+    float trailing = 0;
+  };
+  ComPtr<IDWriteTextFormat> caret_spacing_format_;
+  std::array<CaretSideBearings, 52> caret_spacing_{};
+  void _SetCandidateHover(int index);
+  void _ResetCandidateHover();
+  void _DrawCandidateHover(CRect bounds, float text_center_y, float amount, bool selected);
+  void _ResetCaretMotion();
+  float _CaretPosition(ULONGLONG now) const;
+  CaretSideBearings _MeasureCaretSideBearings(wchar_t letter, IDWriteTextFormat* format);
+  float _BalanceCaretGap(IDWriteTextLayout* layout, IDWriteTextFormat* format,
+                         const std::wstring& text, UINT32 cursor,
+                         float x, float y, const DWRITE_HIT_TEST_METRICS& hit);
+  void _DrawCaret(float x, float top, float bottom, const D2D1_COLOR_F& color);
   HMONITOR m_hMonitor = NULL;
   bool m_redraw_by_monitor_change = false;
 };

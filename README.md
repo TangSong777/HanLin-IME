@@ -10,7 +10,7 @@
 
 | | |
 |---|---|
-| 版本 | `1.2.0` |
+| 版本 | `1.3.0` |
 | 运行环境 | Windows 10 / 11 x64 |
 | 前端与引擎 | HanLinTip（x64、x86） / librime `1.17.0`（x64） |
 | 安装包 | `HanLin-Setup-<版本>.exe` |
@@ -120,7 +120,7 @@
 
 ### 打字统计（可选，默认关闭）
 
-托盘菜单的「查看更多」可查看今日、本周、本月、总计打字数，以及最近 14 个自然日的明细。本周从星期一开始，记录从当前寒淋用户目录读取。
+托盘菜单的「打字统计」可查看今日、本周、本月、总计打字数，并在最近 7、14、30 个自然日之间切换，查看每日字数和趋势。点击「刷新」会重新读取当前寒淋用户目录里的记录。本周从星期一开始。
 
 记录功能**默认关闭**。开启方法：
 
@@ -247,7 +247,7 @@ cC 1 0 0 / 4      →  100/4=25.0
 静默安装（需在已提权终端中运行）：
 
 ```powershell
-.\HanLin-Setup-1.2.0.exe /VERYSILENT /NORESTART /SUPPRESSMSGBOXES
+.\HanLin-Setup-1.3.0.exe /VERYSILENT /NORESTART /SUPPRESSMSGBOXES
 ```
 
 ### 安装布局
@@ -286,6 +286,8 @@ cC 1 0 0 / 4      →  100/4=25.0
 | 语言栏左键 / 右键 | 切换中英文 / 打开寒淋菜单 |
 
 常用的 `Ctrl`、`Alt`、`Win` 组合键和应用功能键交给当前应用或 Windows。只有正在组合拼音时，寒淋才处理 `Ctrl+BackSpace`。单按 `Shift` 切换中英文。
+
+英文模式把普通按键原样交给 Windows。使用美国键盘布局时，字母大小写、数字、标点和小键盘遵循美国键盘的行为。单按 `Shift` 仍用于切换中英文。
 
 大小写匹配只作用于自定义英文编码。大写字母仍可参与整句，例如 `zuogeDNAjiance` → 做个DNA检测。
 
@@ -403,6 +405,12 @@ pwsh -NoProfile -File (Join-Path $install 'Migrate-HanLinUserData.ps1') -Source 
 
 脚本保留本地配置、词表和用户词典的优先级，并生成新的部署缓存与安装标识。来源目录和原寒淋用户目录均可继续使用。脚本打印原寒淋用户目录。要切回时，先退出寒淋后端，再将 `HKCU:\Software\HanLin` 的 `UserDataDir` 改回该路径。
 
+
+### 云同步（可选）
+
+在「设置 → 数据 → 云同步」配对后，点「立即同步」即可按当前状态合并云端词频并上传。本期词频操作要求输入法后端释放该用户词库，避免影响正在进行的输入；需要 Windows PowerShell 7（`pwsh`）。配对和查看状态无需退出。服务器管理员可以读取同步内容，设备凭据保存在本机并由 DPAPI 加密。
+
+默认只同步用户词频文本，合并前留本地备份。新机还没有可合并词库时，先输入并选词再同步。备份保留旧数据，下载或合并失败不会推进同步基线。需要迁移配置时可通过 CLI 显式选择 `-IncludeConfig`。完整说明见 [`docs/CLOUD-SYNC.md`](docs/CLOUD-SYNC.md)。
 
 ## 已知限制
 
@@ -523,7 +531,7 @@ pwsh -NoProfile -File .\src\build-hanlin.ps1 -EngineDll 'C:\Program Files\HanLin
 pwsh -File .\src\installer\build-installer.ps1 -SharedDataDir <Rime共享数据目录> -RimeSourceDir <雾凇拼音源目录>
 ```
 
-打包程序先校验构建记录和白名单，再从共享数据与雾凇源目录预编译随包词库。编译在独立的空配置目录（`--compile-package-data`）中进行，不需要退出桌面后端，也不会改动当前用户已安装的输入法状态。用 `-BuildRoot` 指定前端构建目录，用 `-OutputDir` 指定安装包输出目录。默认输出到 `src\installer\output`，文件名由版本号生成。
+打包程序先校验构建记录和白名单，再从共享数据与雾凇源目录预编译随包词库。随包只启用寒淋当前使用的全拼（方案 ID `rime_ice`），英文混输 `melt_eng` 和部件反查 `radical_pinyin` 作为依赖一并编译。词库基础来自雾凇，个人短语和学习频率保存在本机用户目录，沿用现有方案 ID 可继续读取。编译在独立的空配置目录（`--compile-package-data`）中进行，不需要退出桌面后端，也不会改动当前用户已安装的输入法状态。默认从源码目录的 `.local-build-inputs/SharedData` 与 `.local-build-inputs/RimeSource` 读取公开构建素材；也可显式指定同类素材目录。用 `-BuildRoot` 指定前端构建目录，用 `-OutputDir` 指定安装包输出目录。默认输出到 `src\installer\output`，文件名由版本号生成。
 
 本机部署可运行 `src/deploy-tsf.ps1`，通过安装器注册双架构文本服务。可用 `-UserDataDir` 指定现有用户目录。更换本机旧后台时可通过 `-LegacyServerPath` 精确指定它的可执行文件，脚本会关闭该实例，并在寒淋后台完成握手后切换当前用户的输入法入口。
 

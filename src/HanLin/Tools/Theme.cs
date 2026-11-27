@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -128,6 +129,16 @@ namespace HanLin.Tools
         }
 
         internal bool ReadOnly { set { input.ReadOnly = value; } }
+        internal void MaskInput() { input.UseSystemPasswordChar = true; }
+
+        internal void MakeReadOnlyOutput()
+        {
+            input.Multiline = true;
+            input.ReadOnly = true;
+            input.ScrollBars = ScrollBars.Vertical;
+            input.Font = Theme.Small;
+            PerformLayout();
+        }
         internal new bool Focus() { return input.Focus(); }
 
         protected override void OnLayout(LayoutEventArgs e)
@@ -135,8 +146,9 @@ namespace HanLin.Tools
             base.OnLayout(e);
             if (input == null) return;
             int inset = Theme.Scale(8, DeviceDpi);
-            input.SetBounds(inset, Math.Max(1, (Height - input.PreferredHeight) / 2),
-                Math.Max(1, Width - 2 * inset), input.PreferredHeight);
+            int top = input.Multiline ? inset : Math.Max(1, (Height - input.PreferredHeight) / 2);
+            int height = input.Multiline ? Math.Max(1, Height - 2 * inset) : input.PreferredHeight;
+            input.SetBounds(inset, top, Math.Max(1, Width - 2 * inset), height);
         }
 
         protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); Focus(); }
@@ -158,6 +170,10 @@ namespace HanLin.Tools
         private readonly Action glyph;
         private bool hover;
         private bool pressed;
+        private float hoverAmount;
+        private float hoverStart;
+        private Stopwatch hoverClock;
+        private Timer hoverTimer;
 
         internal InkButton(string text, bool primary = false, Action glyph = Action.None)
         {
@@ -172,28 +188,84 @@ namespace HanLin.Tools
             Dock = DockStyle.Fill;
             Margin = new Padding(3);
             Cursor = Cursors.Hand;
+            DoubleBuffered = true;
         }
 
-        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); hover = true; Invalidate(); }
-        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = pressed = false; Invalidate(); }
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); SetHover(true); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); pressed = false; SetHover(false); }
         protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); pressed = true; Invalidate(); }
         protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); pressed = false; Invalidate(); }
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+
+        [DllImport("user32.dll")]
+        private static extern bool SystemParametersInfo(uint action, uint param, out int value, uint flags);
+
+        private void SetHover(bool active)
+        {
+            hover = active;
+            int enabled;
+            // SPI_GETCLIENTAREAANIMATION
+            if (SystemInformation.HighContrast || !SystemParametersInfo(0x1042, 0, out enabled, 0) || enabled == 0)
+            {
+                if (hoverTimer != null) hoverTimer.Stop();
+                hoverAmount = active ? 1f : 0f;
+                Invalidate();
+                return;
+            }
+            hoverStart = hoverAmount;
+            if (hoverTimer == null)
+            {
+                hoverClock = new Stopwatch();
+                hoverTimer = new Timer { Interval = 16 };
+                hoverTimer.Tick += AdvanceHover;
+            }
+            hoverClock.Restart();
+            hoverTimer.Start();
+            Invalidate();
+        }
+
+        private void AdvanceHover(object sender, EventArgs e)
+        {
+            const float durationMs = 130f;
+            float progress = Math.Min(1f, hoverClock.ElapsedMilliseconds / durationMs);
+            float remaining = 1f - progress;
+            float target = hover ? 1f : 0f;
+            hoverAmount = target + (hoverStart - target) * remaining * remaining * remaining;
+            if (progress >= 1f) hoverTimer.Stop();
+            Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && hoverTimer != null) hoverTimer.Dispose();
+            base.Dispose(disposing);
+        }
+
+        private static Color Blend(Color from, Color to, float amount)
+        {
+            return Color.FromArgb(
+                (int)Math.Round(from.R + (to.R - from.R) * amount),
+                (int)Math.Round(from.G + (to.G - from.G) * amount),
+                (int)Math.Round(from.B + (to.B - from.B) * amount));
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
             graphics.Clear(Parent == null ? Theme.Paper : Parent.BackColor);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            bool menu = glyph != Action.None && glyph != Action.Stats;
+            bool menu = glyph != Action.None;
             int inset = Theme.Scale(menu ? 2 : 1, DeviceDpi);
             var bounds = new Rectangle(inset, 1, Width - 1 - 2 * inset, Height - 3);
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
             Color normal = Parent == null ? Theme.Paper : Parent.BackColor;
-            Color background = !Enabled ? normal : primary ? (pressed ? Theme.AccentPressed : hover ? Theme.AccentHover : Theme.Accent)
-                : pressed ? Theme.Press : hover ? Theme.Hover : normal;
-            Color ink = !Enabled ? Theme.Muted : primary || (SystemInformation.HighContrast && (hover || pressed))
+            bool highContrast = SystemInformation.HighContrast;
+            float amount = highContrast ? (hover ? 1f : 0f) : hoverAmount;
+            Color background = !Enabled ? normal : primary
+                ? (pressed ? Theme.AccentPressed : Blend(Theme.Accent, Theme.AccentHover, amount))
+                : (pressed ? Theme.Press : Blend(Selected ? Theme.Tint : normal, Theme.Hover, amount));
+            Color ink = !Enabled ? Theme.Muted : primary || (highContrast && (hover || pressed))
                 ? Theme.AccentInk : Theme.Ink;
             using (var path = Theme.Rounded(bounds, Theme.Scale(menu ? 5 : 7, DeviceDpi)))
             using (var fill = new SolidBrush(background))
@@ -216,6 +288,8 @@ namespace HanLin.Tools
                 TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
+        internal bool Selected { get; set; }
+
         private void DrawGlyph(Graphics graphics, Point point, int size, Color color)
         {
             var state = graphics.Save();
@@ -228,6 +302,20 @@ namespace HanLin.Tools
                     graphics.DrawRectangle(pen, 2, 1, 10, 12);
                     graphics.DrawLine(pen, 5, 5, 9, 5);
                     graphics.DrawLine(pen, 5, 8, 9, 8);
+                }
+                else if (glyph == Action.Stats)
+                {
+                    graphics.DrawLine(pen, 2, 12, 12, 12);
+                    graphics.DrawLine(pen, 4, 10, 4, 6);
+                    graphics.DrawLine(pen, 7, 10, 7, 3);
+                    graphics.DrawLine(pen, 10, 10, 10, 5);
+                }
+                else if (glyph == Action.Data)
+                {
+                    graphics.DrawPolygon(pen, new[] {
+                        new Point(1, 11), new Point(1, 3), new Point(6, 3),
+                        new Point(8, 5), new Point(13, 5), new Point(13, 11)
+                    });
                 }
                 else if (glyph == Action.Settings)
                 {
@@ -246,10 +334,12 @@ namespace HanLin.Tools
     internal class HanLinForm : Form
     {
         internal readonly Panel Body;
+        protected readonly HoverTips Tips;
         private readonly int cornerRadius;
 
         internal HanLinForm(string caption, Size size, bool popup = false)
         {
+            Tips = new HoverTips(this);
             cornerRadius = popup ? 8 : 10;
             Text = caption;
             Font = Theme.Body;
@@ -282,6 +372,7 @@ namespace HanLin.Tools
                 };
                 var label = Theme.Label(caption, Theme.Heading);
                 var close = new InkButton("×") { AccessibleName = "关闭", DialogResult = DialogResult.Cancel };
+                Tips.Add(close, "关闭（Esc）");
                 close.Click += (sender, args) => Close();
                 label.MouseDown += DragWindow;
                 mark.MouseDown += DragWindow;
@@ -291,6 +382,12 @@ namespace HanLin.Tools
                 title.Controls.Add(close, 2, 0);
                 Controls.Add(title);
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && Tips != null) Tips.Dispose();
+            base.Dispose(disposing);
         }
 
         private void DragWindow(object sender, MouseEventArgs e)

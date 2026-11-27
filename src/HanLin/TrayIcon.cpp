@@ -39,7 +39,7 @@ TrayIcon::TrayIcon(HWND window, HINSTANCE image, const std::filesystem::path& di
   icon_.uID = 1;
   icon_.uCallbackMessage = kTrayNotification;
   icon_.hIcon = chinese_;
-  wcscpy_s(icon_.szTip, L"寒淋输入法 · 中文");
+  wcscpy_s(icon_.szTip, L"寒淋输入法·HanLin-IME");
   Attach();
 }
 
@@ -66,7 +66,6 @@ void TrayIcon::UpdateMode(bool ascii) {
   if (!icon_.hWnd || ascii == ascii_) return;
   ascii_ = ascii;
   icon_.hIcon = (ascii && english_) ? english_ : chinese_;
-  wcscpy_s(icon_.szTip, ascii ? L"寒淋输入法 · 英文" : L"寒淋输入法 · 中文");
   if (!attached_) return;
   icon_.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP;
   if (!Shell_NotifyIconW(NIM_MODIFY, &icon_)) {

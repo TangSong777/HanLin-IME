@@ -1,5 +1,5 @@
 #define MyAppName "寒淋输入法"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppVersionQuad MyAppVersion + ".0"
 #define MyAppPublisher "TangSong777"
 #define MyAppURL "https://github.com/TangSong777/HanLin-IME"
@@ -37,11 +37,12 @@ UninstallDisplayIcon={app}\HanLinHost.exe
 Source: "{#PayloadDir}\HanLinHost.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\HanLinTools.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\HanLinTools.exe.config"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\Sync-HanLin.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\rime.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\Migrate-HanLinUserData.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\x64\HanLinTip.dll"; DestDir: "{app}\x64"; Flags: ignoreversion regserver 64bit
 Source: "{#PayloadDir}\x86\HanLinTip.dll"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit
-Source: "{#PayloadDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PayloadDir}\data\*"; DestDir: "{app}\RuntimeData"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PayloadDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
 
 [InstallDelete]

@@ -256,11 +256,17 @@ bool TestTransport() {
       client.Call({kProtocolVersion, Command::Place, current, position}, state) && state.has_caret &&
       client.Call({kProtocolVersion, Command::Place, current}, state) && state.session == current && !state.has_caret &&
       client.Call({kProtocolVersion, Command::Place, current, position}, state) && state.has_caret;
+  const bool ascii = placement &&
+      client.Call({kProtocolVersion, Command::SetAscii, current, {1}}, state) && state.ascii &&
+      client.Call({kProtocolVersion, Command::Key, current, {'!'}}, state) &&
+      state.ascii && !state.handled && !state.composing && state.commit.empty() &&
+      client.Call({kProtocolVersion, Command::SetAscii, current, {0}}, state) && !state.ascii;
   if (replaced) client.Call({kProtocolVersion, Command::Close, current}, state);
   DestroyWindow(window);
   UnregisterClassW(kClientWindowClass, module);
   return Check(recovered, "same-window reconnect invalidates abandoned session") &
       Check(stale && selected, "stale selection is ignored and current selection still works") &
+      Check(ascii, "backend leaves ASCII keys from older clients to Windows") &
       Check(placement, "placement can clear and recover on the same session");
 }
 
@@ -384,7 +390,18 @@ bool TestTextService(HMODULE library, bool tray, bool menu_request) {
   passed &= Check(shift_chord && key('N') && key(VK_ESCAPE) && store->text.empty(),
                   "a shortcut chord leaves Chinese mode unchanged");
   const bool shift_to_ascii = shift_press() && send_key(VK_LSHIFT, {}, true).tested;
-  const bool ascii_passthrough = shift_to_ascii && key('N', false, false) && store->text.empty();
+  bool ascii_passthrough = shift_to_ascii;
+  store->reject_write_lock = true;
+  for (const UINT vk : std::initializer_list<UINT>{'A', 'Z', '0', '9', VK_OEM_1, VK_OEM_2, VK_OEM_3,
+                       VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_PLUS,
+                       VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_NUMPAD3,
+                       VK_DECIMAL, VK_DIVIDE, VK_CAPITAL, VK_TAB, VK_RETURN, VK_BACK}) {
+    ascii_passthrough &= host_key(vk) && host_key(vk, {}, true);
+  }
+  ascii_passthrough &= shift_press() && host_key('N', {VK_SHIFT, VK_LSHIFT}) &&
+      host_key(VK_OEM_2, {VK_SHIFT, VK_LSHIFT}) && host_key(VK_LSHIFT, {}, true) &&
+      host_key('C', {VK_CONTROL}) && host_key(VK_LEFT) && store->text.empty();
+  store->reject_write_lock = false;
   const bool shift_to_chinese = shift_press() && send_key(VK_LSHIFT, {}, true).tested;
   passed &= Check(ascii_passthrough && shift_to_chinese && key('N') && key(VK_ESCAPE),
                   "standalone Shift taps still toggle both input modes");

@@ -41,22 +41,21 @@ if ($manifest.version -cne $packageVersion -or $manifest.sourceFingerprint -cne 
     throw '构建记录与当前前端源码或版本不同，请重新运行 build-hanlin.ps1。'
 }
 
+# The default release inputs are the curated public dictionary and its shared
+# resources. Runtime profiles can contain private phrases and learning data.
+$releaseInputs = Join-Path $repo '.local-build-inputs'
 if (-not $SharedDataDir) {
-    $installed = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\HanLin' -ErrorAction SilentlyContinue).InstallRoot
-    $roots = @((Join-Path $BuildRoot 'hanlin-tip-x64\data'))
-    if ($installed) { $roots += Join-Path $installed 'data' }
-    $SharedDataDir = $roots |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_ 'default.yaml') -PathType Leaf } | Select-Object -First 1
+    $SharedDataDir = Join-Path $releaseInputs 'SharedData'
 }
 if (-not $RimeSourceDir) {
-    $RimeSourceDir = (Get-ItemProperty -LiteralPath 'HKCU:\Software\HanLin' -Name UserDataDir -ErrorAction SilentlyContinue).UserDataDir
-    if (-not $RimeSourceDir) { $RimeSourceDir = Join-Path $env:APPDATA 'HanLin' }
+    $RimeSourceDir = Join-Path $releaseInputs 'RimeSource'
 }
 if (-not $SharedDataDir -or -not (Test-Path -LiteralPath (Join-Path $SharedDataDir 'default.yaml') -PathType Leaf)) {
     throw '请用 -SharedDataDir 指定包含 default.yaml 的 Rime 共享数据。'
 }
-if (-not (Test-Path -LiteralPath (Join-Path $RimeSourceDir 'rime_ice.schema.yaml') -PathType Leaf)) {
-    throw '请用 -RimeSourceDir 指定雾凇拼音源文件目录。'
+if (-not (Test-Path -LiteralPath (Join-Path $RimeSourceDir 'rime_ice.schema.yaml') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $RimeSourceDir 'LICENSE') -PathType Leaf)) {
+    throw '请用 -RimeSourceDir 指定包含 rime_ice.schema.yaml 和 LICENSE 的雾凇拼音源文件目录。'
 }
 
 function Copy-PayloadFile([string]$Source, [string]$Target) {
@@ -76,18 +75,34 @@ foreach ($artifact in (Get-HanLinBuildArtifacts).GetEnumerator()) {
     }
 }
 Copy-PayloadFile (Join-Path $root 'Migrate-HanLinUserData.ps1') (Join-Path $payload 'Migrate-HanLinUserData.ps1')
+Copy-PayloadFile (Join-Path $src 'Sync-HanLin.ps1') (Join-Path $payload 'Sync-HanLin.ps1')
 New-Item -ItemType Directory -Path $data,$preset -Force | Out-Null
-foreach ($item in Get-ChildItem -LiteralPath $SharedDataDir) {
-    if ($item.Name -match '(?i)^weasel(?:\.|$)') { continue }
-    if ($item.PSIsContainer -and $item.Name -ne 'opencc') { continue }
-    if (-not $item.PSIsContainer -and $item.Name -notmatch '\.(?:yaml|txt)$') { continue }
-    Copy-Item -LiteralPath $item.FullName -Destination $data -Recurse -Force
+# Ship only the runtime resources the HanLin full-pinyin stack may use.
+# The distributor's shared directory can contain additional, unrelated schemas.
+foreach ($name in 'essay.txt','key_bindings.yaml','pinyin.yaml','punctuation.yaml','symbols.yaml') {
+    $source = Join-Path $SharedDataDir $name
+    if (Test-Path -LiteralPath $source -PathType Leaf) {
+        Copy-PayloadFile $source (Join-Path $data $name)
+    }
+}
+$sharedOpenCc = Join-Path $SharedDataDir 'opencc'
+if (Test-Path -LiteralPath $sharedOpenCc -PathType Container) {
+    Copy-Item -LiteralPath $sharedOpenCc -Destination $data -Recurse -Force
 }
 # 雾凇从自己的 default.yaml 继承标点映射和按键绑定。
 foreach ($name in 'default.yaml','rime_ice.schema.yaml','melt_eng.schema.yaml','melt_eng.dict.yaml',
                   'radical_pinyin.schema.yaml','radical_pinyin.dict.yaml','symbols_v.yaml','symbols_caps_v.yaml') {
     Copy-PayloadFile (Join-Path $RimeSourceDir $name) (Join-Path $data $name)
 }
+$defaultPath = Join-Path $data 'default.yaml'
+$defaultText = [IO.File]::ReadAllText($defaultPath)
+$schemaList = [regex]::new('(?m)^schema_list:[^\r\n]*\r?\n(?:(?:[ \t]+[^\r\n]*|[ \t]*)\r?\n)*')
+if ($schemaList.Matches($defaultText).Count -ne 1) {
+    throw '无法识别雾凇默认配置的方案列表。'
+}
+$lineEnd = if ($defaultText.Contains("`r`n")) { "`r`n" } else { "`n" }
+[IO.File]::WriteAllText($defaultPath, $schemaList.Replace($defaultText,
+    "schema_list:${lineEnd}  - schema: rime_ice${lineEnd}${lineEnd}", 1))
 Copy-PayloadFile (Join-Path $config 'rime_ice.dict.yaml') (Join-Path $data 'rime_ice.dict.yaml')
 Copy-PayloadFile (Join-Path $config 'hanlin.yaml') (Join-Path $data 'hanlin.yaml')
 $mixedTokens = Join-Path $data 'mixed_tokens.dict.yaml'
@@ -138,6 +153,13 @@ try {
 if ($deployExit -ne 0) { throw "安装包词库编译失败，退出码 $deployExit。" }
 Copy-Item -LiteralPath (Join-Path $compiledProfile 'build') -Destination (Join-Path $data 'build') -Recurse
 
+$requiredSchemas = 'melt_eng.schema.yaml','radical_pinyin.schema.yaml','rime_ice.schema.yaml'
+foreach ($folder in $data, (Join-Path $data 'build')) {
+    $schemas = @(Get-ChildItem -LiteralPath $folder -Filter '*.schema.yaml' -File | Select-Object -ExpandProperty Name)
+    if (Compare-Object $requiredSchemas $schemas) {
+        throw "寒淋方案或其依赖清单异常：$folder"
+    }
+}
 foreach ($name in 'default.yaml','rime_ice.schema.yaml','rime_ice.table.bin','rime_ice.prism.bin','hanlin.yaml') {
     if ((Get-Item -LiteralPath (Join-Path $data "build\$name")).Length -eq 0) { throw "安装包缺少编译产物 $name。" }
 }
@@ -146,7 +168,7 @@ $private = @(Get-ChildItem -LiteralPath $payload -Recurse -Force | Where-Object 
 })
 if ($private) { throw "安装包混入用户数据 $($private[0].Name)。" }
 $localSkin = @(Get-ChildItem -LiteralPath $payload -Recurse -Force | Where-Object {
-    $_.Name -match '^(?:skin\.ini|Color-P)$|\.ssf$'
+    $_.Name -match '^(?:skin|skin\.ini)$|\.ssf$'
 })
 if ($localSkin) { throw "安装包混入本机皮肤资源 $($localSkin[0].Name)。" }
 $dataFiles = @((Get-ChildItem -LiteralPath $data -Recurse -Force -File).FullName; (Join-Path $payload 'rime.dll'))

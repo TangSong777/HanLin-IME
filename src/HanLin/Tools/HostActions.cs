@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Text;
+using System.Web.Script.Serialization;
 using Microsoft.Win32;
 
 namespace HanLin.Tools
@@ -26,10 +28,58 @@ namespace HanLin.Tools
                     userData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HanLin");
             }
             DirectoryPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(userData));
-            Shared = Path.GetFullPath(sharedData ?? Path.Combine(install, "data"));
+            string runtime = Path.Combine(install, "RuntimeData");
+            Shared = Path.GetFullPath(sharedData ?? (Directory.Exists(runtime) ? runtime : Path.Combine(install, "data")));
             Preset = Path.Combine(Shared, "preset");
             executable = Path.Combine(install, "HanLinHost.exe");
             Words = new WordStore(DirectoryPath);
+        }
+
+        internal static string ConfiguredSyncServer(string profile)
+        {
+            try
+            {
+                var path = Path.Combine(profile, ".hanlin-sync.json");
+                if (!File.Exists(path)) return null;
+                var values = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+                object value;
+                return values.TryGetValue("server", out value) ? value as string : null;
+            }
+            catch (Exception error)
+            {
+                if (error is IOException || error is UnauthorizedAccessException ||
+                    error is ArgumentException || error is InvalidOperationException) return null;
+                throw;
+            }
+        }
+
+        internal Tuple<int, string> CloudSync(string action, string server, string name, string code, string commit)
+        {
+            string script = Path.Combine(Path.GetDirectoryName(executable), "Sync-HanLin.ps1");
+            if (!File.Exists(script)) throw new FileNotFoundException("安装目录里缺少云同步脚本，请重新安装。");
+            var args = new List<string> { "-NoLogo", "-NoProfile", "-NonInteractive", "-File", script,
+                action, "-UserData", DirectoryPath, "-HostPath", executable, "-SharedData", Shared,
+                "-Server", server, "-DeviceName", name };
+            if (commit != null) { args.Add("-Commit"); args.Add(commit); }
+            if (code != null) args.Add("-PairFromStdin");
+            string pwsh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "PowerShell", "7", "pwsh.exe");
+            if (!File.Exists(pwsh)) pwsh = "pwsh.exe";
+            using (var process = Process.Start(new ProcessStartInfo(pwsh, string.Join(" ", args.Select(Quote))) {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
+                WorkingDirectory = Path.GetDirectoryName(script)
+            }))
+            {
+                var stdout = process.StandardOutput.ReadToEndAsync();
+                var stderr = process.StandardError.ReadToEndAsync();
+                if (code != null) process.StandardInput.WriteLine(code);
+                process.StandardInput.Close();
+                process.WaitForExit();
+                var text = (stdout.Result + stderr.Result).Trim();
+                return Tuple.Create(process.ExitCode, text);
+            }
         }
 
         internal TypingStats Stats() { return TypingStats.Read(Path.Combine(DirectoryPath, "stats.log"), DateTime.Today); }

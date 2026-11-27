@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace hanlin {
 namespace {
@@ -195,6 +196,7 @@ class EngineHost {
 
   void Initialize(const std::wstring& shared, const std::wstring& personal, bool deploy,
                   const fs::path& staging = {}) {
+    personal_ = personal;
     const auto shared_utf8 = Utf8(shared);
     const auto personal_utf8 = Utf8(personal);
     const auto staging_utf8 = Utf8(staging.wstring());
@@ -232,6 +234,19 @@ class EngineHost {
     const bool available = id && std::string_view(id) == kSchema;
     api_->config_close(&schema);
     return available && api_->deploy_config_file("hanlin.yaml", "config_version");
+  }
+
+  // One-shot user dictionary sync for the standalone --sync-user-data mode.
+  // librime imports every *.userdb.txt under the profile's sync directory and
+  // exports the local user dictionary back, so both sides converge in one run.
+  bool SyncUserData() {
+    if (!RIME_API_AVAILABLE(api_, sync_user_data)) return false;
+    if (api_->sync_user_data() == 0) return false;
+    // The request schedules the import/export on the maintenance thread; joining
+    // keeps the one-shot mode from returning before the export is written.
+    if (RIME_API_AVAILABLE(api_, join_maintenance_thread))
+      api_->join_maintenance_thread();
+    return true;
   }
 
   void AttachWindow(HWND window, HINSTANCE image, const fs::path& directory,
@@ -305,16 +320,23 @@ class EngineHost {
       case Command::Clear:
         api_->clear_composition(id);
         break;
-      case Command::SetAscii:
-        api_->set_option(id, "ascii_mode", request.args[0] != 0);
-        if (global_ascii_) ascii_ = request.args[0] != 0;
+      case Command::SetAscii: {
+        const bool next = request.args[0] != 0;
+        if (next && !api_->get_option(id, "ascii_mode")) api_->clear_composition(id);
+        api_->set_option(id, "ascii_mode", next);
+        if (global_ascii_) ascii_ = next;
         break;
+      }
       case Command::Key: {
         SetActive(request.session);
         if (global_ascii_ && !!api_->get_option(id, "ascii_mode") != ascii_)
           api_->set_option(id, "ascii_mode", ascii_);
         const bool shift = request.args[0] == XK_Shift_L || request.args[0] == XK_Shift_R;
-        const bool before = shift && api_->get_option(id, "ascii_mode") != 0;
+        const bool before = api_->get_option(id, "ascii_mode") != 0;
+        if (before && !shift) {
+          handled = false;
+          break;
+        }
         handled = api_->process_key(id, request.args[0], request.args[1]) != 0;
         if (shift || global_ascii_) {
           const bool mode = api_->get_option(id, "ascii_mode") != 0;
@@ -551,7 +573,12 @@ class EngineHost {
     }
     if (frame_changed_ || needs_window || !ui_.IsShown()) {
       weasel::Context context;
-      if (!state.inline_preedit) context.preedit.str = state.preedit;
+      if (!state.inline_preedit && !state.preedit.empty()) {
+        context.preedit.str = state.preedit;
+        weasel::TextAttribute cursor;
+        cursor.range.cursor = static_cast<int>((std::min)(static_cast<size_t>(state.caret), state.preedit.size()));
+        context.preedit.attributes.push_back(cursor);
+      }
       context.cinfo.currentPage = static_cast<int>(state.page);
       context.cinfo.is_last_page = state.last_page;
       context.cinfo.highlighted = static_cast<int>(state.selection);
@@ -598,16 +625,18 @@ class EngineHost {
     style.hilited_back_color = style.hilited_candidate_back_color = color(252, 238, 235);
     style.hilited_text_color = style.hilited_candidate_text_color = color(147, 68, 77);
     style.hilited_label_text_color = style.hilited_comment_text_color = style.hilited_text_color;
+    style.hover_type = weasel::UIStyle::HoverType::SEMI_HILITE;
     style.prevpage_color = style.nextpage_color = style.label_text_color;
 
-    const auto program_data = KnownDirectory(FOLDERID_ProgramData);
-    if (!program_data.empty()) {
-      const auto directory = program_data / L"HanLin" / L"Skin";
-      std::error_code error;
-      if (fs::is_regular_file(directory / L"skin.ini", error)) {
-        style.ssf_enabled = true;
-        style.ssf_skin = directory.wstring();
-      }
+    auto skin = personal_ / L"Skin";
+    std::error_code error;
+    if (!fs::is_regular_file(skin / L"skin.ini", error)) {
+      const auto program_data = KnownDirectory(FOLDERID_ProgramData);
+      skin = program_data.empty() ? fs::path{} : program_data / L"HanLin" / L"Skin";
+    }
+    if (!skin.empty() && fs::is_regular_file(skin / L"skin.ini", error)) {
+      style.ssf_enabled = true;
+      style.ssf_skin = skin.wstring();
     }
 
     RimeConfig config{};
@@ -618,6 +647,7 @@ class EngineHost {
     api_->config_close(&config);
   }
 
+  fs::path personal_;
   HMODULE module_ = nullptr;
   RimeApi* api_ = nullptr;
   bool setup_ = false;
@@ -740,13 +770,158 @@ int RunEngine(HINSTANCE image, const fs::path& directory, const std::wstring& sh
   return RunWindow(image, engine, directory, shared, personal, enable_tray);
 }
 
+std::string ReadInstallationId(const fs::path& personal) {
+  std::ifstream file(personal / L"installation.yaml", std::ios::binary);
+  if (!file) return {};
+  constexpr std::string_view key = "installation_id:";
+  std::string line;
+  while (std::getline(file, line)) {
+    if (line.rfind(key, 0) != 0) continue;
+    std::string value = line.substr(key.size());
+    const auto first = value.find_first_not_of(" \t\r\"'");
+    if (first == std::string::npos) return {};
+    const auto last = value.find_last_not_of(" \t\r\"'");
+    return value.substr(first, last - first + 1);
+  }
+  return {};
+}
+
+std::string JsonEscape(std::string_view text) {
+  std::string escaped;
+  escaped.reserve(text.size() + 8);
+  for (const char ch : text) {
+    switch (ch) {
+      case '\\': escaped += "\\\\"; break;
+      case '"': escaped += "\\\""; break;
+      case '\n': escaped += "\\n"; break;
+      case '\r': escaped += "\\r"; break;
+      case '\t': escaped += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(ch) >= 0x20) escaped += ch;
+    }
+  }
+  return escaped;
+}
+
+bool IsUserDbExport(const std::wstring& name) {
+  constexpr std::wstring_view suffix = L".userdb.txt";
+  return name.size() >= suffix.size() &&
+         name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+struct SyncFileInfo {
+  std::wstring name;
+  uintmax_t bytes = 0;
+};
+
+bool CollectSyncFiles(const fs::path& personal, const std::string& id,
+                      std::vector<SyncFileInfo>& files, fs::path& root) {
+  std::error_code error;
+  root = personal / L"sync" / fs::path(Wide(id));
+  if (id.empty() || !fs::is_directory(root, error)) {
+    // A profile without a readable installation id still reports what librime
+    // exported, using the newest directory under sync/.
+    root.clear();
+    const fs::path parent = personal / L"sync";
+    if (!fs::is_directory(parent, error)) return false;
+    std::filesystem::file_time_type newest{};
+    for (const auto& entry : fs::directory_iterator(parent, error)) {
+      if (error) break;
+      std::error_code kind;
+      if (!entry.is_directory(kind)) continue;
+      std::error_code stamp_error;
+      const auto stamp = entry.last_write_time(stamp_error);
+      if (stamp_error) continue;
+      if (root.empty() || stamp > newest) {
+        root = entry.path();
+        newest = stamp;
+      }
+    }
+    if (root.empty()) return false;
+  }
+  for (const auto& entry : fs::directory_iterator(root, error)) {
+    if (error) break;
+    std::error_code kind;
+    if (!entry.is_regular_file(kind)) continue;
+    const auto name = entry.path().filename().wstring();
+    if (!IsUserDbExport(name)) continue;
+    files.push_back({name, entry.file_size(kind)});
+  }
+  return !files.empty();
+}
+
+// Standalone user data sync: the profile is supplied explicitly, the desktop host
+// mutex is never taken, no window or tray is created and the TSF service is untouched.
+// The outcome is written to <profile>\sync-report.json because a windows-subsystem
+// binary has no stdout for the packaging scripts to read.
+int RunSyncUserData(const fs::path& directory, const std::wstring& shared,
+                    const fs::path& personal) {
+  const auto engine_guard = CreateFileW((personal / L".hanlin-librime.lock").c_str(),
+      GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_HIDDEN, nullptr);
+  if (engine_guard == INVALID_HANDLE_VALUE) return 3;
+  const fs::path report_path = personal / L"sync-report.json";
+  std::ofstream report(report_path, std::ios::binary | std::ios::trunc);
+  if (!report) { CloseHandle(engine_guard); return 1; }
+
+  EngineHost engine;
+  std::string error;
+  bool synced = false;
+  std::string installation_id;
+  std::vector<SyncFileInfo> files;
+  fs::path sync_root;
+  if (!engine.Load(directory / L"rime.dll")) {
+    error = "could not load rime.dll";
+  } else {
+    // The deployment module group (core, dict, levers) registers the sync tasks;
+    // the regular service initialization only loads core, dict and gears.
+    engine.Initialize(shared, personal.wstring(), true);
+    installation_id = ReadInstallationId(personal);
+    synced = engine.SyncUserData();
+    const bool exported =
+        synced && CollectSyncFiles(personal, installation_id, files, sync_root);
+    engine.Finalize();
+    if (!synced)
+      error = "librime rejected the user data sync";
+    else if (!exported)
+      error = "librime exported no *.userdb.txt";
+    synced = exported;
+  }
+
+  uintmax_t total = 0;
+  for (const auto& file : files) total += file.bytes;
+
+  report << "{\n";
+  report << "  \"ok\": " << (synced ? "true" : "false") << ",\n";
+  report << "  \"profile\": \"" << JsonEscape(Utf8(personal.wstring())) << "\",\n";
+  report << "  \"sharedData\": \"" << JsonEscape(Utf8(shared)) << "\",\n";
+  report << "  \"installationId\": \"" << JsonEscape(installation_id) << "\",\n";
+  report << "  \"syncDir\": \"" << JsonEscape(Utf8(sync_root.wstring())) << "\",\n";
+  report << "  \"totalBytes\": " << total << ",\n";
+  report << "  \"files\": [";
+  for (size_t index = 0; index < files.size(); ++index) {
+    report << (index ? ",\n" : "\n") << "    {\"name\": \""
+           << JsonEscape(Utf8(files[index].name)) << "\", \"bytes\": "
+           << files[index].bytes << "}";
+  }
+  report << (files.empty() ? "]" : "\n  ]") << ",\n";
+  report << "  \"error\": \"" << JsonEscape(error) << "\"\n";
+  report << "}\n";
+  report.close();
+  CloseHandle(engine_guard);
+  return synced ? 0 : 1;
+}
+
 int RunHost(HINSTANCE image) {
   wchar_t filename[32768]{};
   const DWORD length = GetModuleFileNameW(image, filename, static_cast<DWORD>(std::size(filename)));
   if (!length || length >= std::size(filename)) return 1;
   const auto directory = std::filesystem::path(filename).parent_path();
-  auto shared = (directory / L"data").wstring();
+  const auto runtime_data = directory / L"RuntimeData";
+  std::error_code runtime_error;
+  auto shared = (fs::is_regular_file(runtime_data / L"default.yaml", runtime_error)
+      ? runtime_data : directory / L"data").wstring();
   std::wstring personal;
+  std::wstring sync_user;
 
   int count = 0;
   const auto args = CommandLineToArgvW(GetCommandLineW(), &count);
@@ -775,32 +950,75 @@ int RunHost(HINSTANCE image) {
   }
   bool stop = false;
   bool deploy = false;
+  bool desktop_update = false;
   bool enable_tray = false;
   bool valid = true;
   for (int i = 1; i < count; ++i) {
     const std::wstring_view key(args[i]);
     if (key == L"--stop") stop = true;
     else if (key == L"--deploy") deploy = true;
+    else if (key == L"--activate-desktop-update") desktop_update = true;
     else if (key == L"--no-tray") enable_tray = false;
     else if (key == L"--show-tray") enable_tray = true;
     else if (key == L"--shared-data" && i + 1 < count) shared = args[++i];
     else if (key == L"--user-data" && i + 1 < count) personal = args[++i];
+    else if (key == L"--sync-user-data" && i + 1 < count) sync_user = args[++i];
     else valid = false;
   }
   LocalFree(args);
-  if (!valid || (stop && deploy)) return 2;
+  if (!valid || (stop && deploy) || (desktop_update && (stop || deploy))) return 2;
   if (stop) return StopRunningHost();
+  if (!sync_user.empty()) {
+    // One-shot user dictionary sync: explicit profile, no desktop host involvement.
+    const fs::path profile(sync_user);
+    std::error_code error;
+    if (!profile.is_absolute() || !fs::is_directory(profile, error) ||
+        !fs::is_directory(shared, error))
+      return 2;
+    const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const auto result = RunSyncUserData(directory, shared, profile);
+    if (SUCCEEDED(initialized)) CoUninitialize();
+    return result;
+  }
 
   if (personal.empty()) personal = DefaultUserDataDirectory();
   std::error_code error;
   if (personal.empty() || !std::filesystem::is_directory(shared, error)) return 1;
 
-  const auto name = L"Local\\HanLinEngineHost." + UserSid();
+  const auto sid = UserSid();
+  const auto name = L"Local\\HanLinEngineHost." + sid;
   const HANDLE mutex = CreateMutexW(nullptr, FALSE, name.c_str());
   if (!mutex) return 1;
-  if (GetLastError() == ERROR_ALREADY_EXISTS) { CloseHandle(mutex); return deploy ? 3 : 0; }
+  const bool already_running = GetLastError() == ERROR_ALREADY_EXISTS;
+  if (desktop_update) {
+    const auto event_name = L"Local\\HanLinDesktopUpdate." + sid;
+    const auto ready = OpenEventW(SYNCHRONIZE, FALSE, event_name.c_str());
+    const bool reserved = ready && WaitForSingleObject(ready, 0) == WAIT_OBJECT_0;
+    if (ready) CloseHandle(ready);
+    if (!already_running || !reserved) { CloseHandle(mutex); return 2; }
+  } else if (already_running) {
+    CloseHandle(mutex);
+    return deploy ? 3 : 0;
+  }
+  fs::create_directories(personal, error);
+  const auto profile_guard = CreateFileW((fs::path(personal) / L".hanlin-sync-operation.lock").c_str(),
+      GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+      OPEN_ALWAYS, FILE_ATTRIBUTE_HIDDEN, nullptr);
+  if (profile_guard == INVALID_HANDLE_VALUE) {
+    CloseHandle(mutex);
+    return 3;
+  }
+  const auto engine_guard = CreateFileW((fs::path(personal) / L".hanlin-librime.lock").c_str(),
+      GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_HIDDEN, nullptr);
+  if (engine_guard == INVALID_HANDLE_VALUE) {
+    CloseHandle(profile_guard);
+    CloseHandle(mutex);
+    return 3;
+  }
   const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   const auto result = RunEngine(image, directory, shared, personal, deploy, enable_tray);
+  CloseHandle(engine_guard);
+  CloseHandle(profile_guard);
   if (SUCCEEDED(initialized)) CoUninitialize();
   CloseHandle(mutex);
   return result;

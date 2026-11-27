@@ -63,12 +63,15 @@ if(HANLIN_BUILD_HOST)
     NO_DEFAULT_PATH REQUIRED)
   set(tools "${CMAKE_CURRENT_SOURCE_DIR}/Tools")
   configure_file("${tools}/AssemblyInfo.cs.in" HanLinToolsAssemblyInfo.cs @ONLY)
-  set(tools_sources "${tools}/HostActions.cs" "${tools}/Program.cs" "${tools}/Theme.cs"
-    "${tools}/TypingStats.cs" "${tools}/Windows.cs" "${tools}/WordStore.cs")
+  set(tools_sources "${tools}/HostActions.cs" "${tools}/Program.cs" "${tools}/Theme.cs" "${tools}/HoverTips.cs"
+    "${tools}/TrayMenu.cs" "${tools}/SyncWindow.cs" "${tools}/TypingStats.cs" "${tools}/Windows.cs" "${tools}/WordStore.cs")
   set(tools_exe "${CMAKE_CURRENT_BINARY_DIR}/HanLinTools.exe")
   set(tools_version "${CMAKE_CURRENT_BINARY_DIR}/HanLinToolsAssemblyInfo.cs")
   set(tools_references /reference:System.dll /reference:System.Core.dll
-    /reference:System.Windows.Forms.dll /reference:System.Drawing.dll)
+    /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll
+    "/reference:$ENV{SystemRoot}/Microsoft.NET/Framework64/v4.0.30319/WPF/WindowsBase.dll"
+    "/reference:$ENV{SystemRoot}/Microsoft.NET/Framework64/v4.0.30319/WPF/PresentationCore.dll"
+    "/reference:$ENV{SystemRoot}/Microsoft.NET/Framework64/v4.0.30319/WPF/PresentationFramework.dll")
   set(tools_icon "${CMAKE_CURRENT_SOURCE_DIR}/icons/hanlin.ico")
   set(tools_native_sources)
   foreach(file IN LISTS tools_sources tools_version)
@@ -101,4 +104,9 @@ if(HANLIN_BUILD_REGRESSION)
   hanlin_native(HanLinFrontendRegression)
   target_include_directories(HanLinFrontendRegression PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(HanLinFrontendRegression PRIVATE hanlin_transport ole32 oleaut32 uuid)
+
+  # Test-only probe: learns real user dictionary entries for the sync checks.
+  add_executable(HanLinSyncProbe ../test/TestHanLin/SyncProbe.cpp)
+  hanlin_native(HanLinSyncProbe)
+  target_include_directories(HanLinSyncProbe PRIVATE ../include ../../reference/librime-reference/include)
 endif()

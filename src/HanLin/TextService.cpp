@@ -407,6 +407,9 @@ class TextService final : public ITfTextInputProcessorEx,
     const bool shift_key = IsShiftKey(vk);
     const bool composing = composing_ && context == context_.Get();
     if (!shift_key && !release) shift_tap_.reset();
+    // ASCII mode is native keyboard input. In particular, do not claim the
+    // preview and then try to give the key back after an edit-session request.
+    if (ascii_ && !shift_key) return {};
     if (word >= 256 || (!shift_key && release && !composing)) return {};
 
     BYTE keyboard[256]{};
@@ -707,7 +710,7 @@ class TextService final : public ITfTextInputProcessorEx,
     if (TestContext(context)) {
       edit_cookie_ = Advise(context, IID_ITfTextEditSink, static_cast<ITfTextEditSink*>(this));
       layout_cookie_ = Advise(context, IID_ITfTextLayoutSink, static_cast<ITfTextLayoutSink*>(this));
-      if (!token_) transport_.WakeIfMissing();
+      if (!EnsureSession(false)) transport_.WakeIfMissing();
       State state;
       if (Call(Command::Focus, {}, state) == CallResult::Success) UpdateMode(state.ascii);
     }
@@ -715,7 +718,9 @@ class TextService final : public ITfTextInputProcessorEx,
 
   void SetMode(bool ascii) {
     State state;
-    if (SendInput(Command::SetAscii, {ascii ? 1 : 0}, state)) UpdateMode(state.ascii);
+    if (!SendInput(Command::SetAscii, {ascii ? 1 : 0}, state)) return;
+    if (state.ascii && !ascii_) ResetInput();
+    UpdateMode(state.ascii);
   }
 
   void ResetInput(std::optional<TfEditCookie> cookie = {}) {
@@ -758,7 +763,7 @@ class TextService final : public ITfTextInputProcessorEx,
     return window && transport_.Call(request, reply, true) && reply.handled;
   }
 
-  bool EnsureSession() {
+  bool EnsureSession(bool wake_host = true) {
     if (token_) return true;
     if (GetTickCount64() < retry_after_) return false;
     Request request;
@@ -766,8 +771,8 @@ class TextService final : public ITfTextInputProcessorEx,
     request.args[0] = static_cast<int32_t>(window);
     request.args[1] = static_cast<int32_t>(window >> 32);
     State state;
-    if (!transport_.Call(request, state, true) || !state.session) {
-      retry_after_ = GetTickCount64() + 400;
+    if (!transport_.Call(request, state, wake_host) || !state.session) {
+      if (wake_host) retry_after_ = GetTickCount64() + 400;
       return false;
     }
     token_ = state.session;

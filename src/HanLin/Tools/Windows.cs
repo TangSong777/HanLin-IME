@@ -9,109 +9,120 @@ using System.Windows.Forms;
 
 namespace HanLin.Tools
 {
-    internal enum Action { None, Stats, Words, Settings }
-
-    internal sealed class TrayMenu : HanLinForm
-    {
-        private readonly Point anchor;
-        internal Action Choice { get; private set; }
-
-        internal TrayMenu(HostActions host, Point anchor) : base("寒淋输入法", new Size(280, 229), true)
-        {
-            this.anchor = anchor;
-            Location = anchor;
-            var layout = Theme.Layout(1, 27, 105, 37, 37);
-            var header = Theme.Label("寒淋输入法", Theme.Small);
-            header.Padding = new Padding(7, 0, 0, 0);
-            var card = Theme.Layout(2, 27, 56);
-            card.BackColor = Theme.Tint;
-            card.Padding = new Padding(10, 8, 8, 6);
-            card.Margin = new Padding(3, 2, 3, 8);
-            card.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 100);
-            card.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 90);
-            card.Controls.Add(Theme.Label("今日打字", Theme.Small, Theme.Muted), 0, 0);
-            string number;
-            try { number = host.Stats().Today.ToString("N0"); }
-            catch (IOException) { number = "读取失败"; }
-            catch (UnauthorizedAccessException) { number = "读取失败"; }
-            card.Controls.Add(Theme.Label(number, Theme.Metric, Theme.Ink), 0, 1);
-            var more = MenuButton("查看更多", Action.Stats);
-            card.Controls.Add(more, 1, 1);
-            layout.Controls.Add(header, 0, 0);
-            layout.Controls.Add(card, 0, 1);
-            layout.Controls.Add(MenuButton("词库管理", Action.Words), 0, 2);
-            layout.Controls.Add(MenuButton("设置", Action.Settings), 0, 3);
-            Body.Controls.Add(layout);
-            ActiveControl = more;
-        }
-
-        private InkButton MenuButton(string text, Action action)
-        {
-            var button = new InkButton(text, action == Action.Stats, action);
-            button.Click += (sender, args) => { Choice = action; Close(); };
-            return button;
-        }
-
-        protected override void OnLoad(EventArgs e)
-        {
-            base.OnLoad(e);
-            var area = Screen.FromPoint(anchor).WorkingArea;
-            if (Width > area.Width) Width = area.Width;
-            if (Height > area.Height) Height = area.Height;
-            int x = Math.Max(area.Left, Math.Min(area.Right - Width, anchor.X - Width + 12));
-            int y = anchor.Y - Height - 8;
-            if (y < area.Top) y = anchor.Y + 10;
-            Location = new Point(x, Math.Max(area.Top, Math.Min(area.Bottom - Height, y)));
-        }
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            Activate();
-        }
-
-        protected override void OnDeactivate(EventArgs e)
-        {
-            base.OnDeactivate(e);
-            if (Visible) Close();
-        }
-    }
+    internal enum Action { None, Stats, Words, Settings, Data, CloudSync }
 
     internal sealed class StatsWindow : HanLinForm
     {
-        internal StatsWindow(HostActions host) : base("打字统计", new Size(700, 646))
+        private readonly HostActions host;
+        private readonly Label[] totals = new Label[4];
+        private readonly Label summary = Theme.Label("", Theme.Small, Theme.Muted);
+        private readonly Label footer = Theme.Label("", Theme.Small, Theme.Muted);
+        private readonly DataGridView rows = Theme.Grid();
+        private readonly InkButton[] ranges = new InkButton[3];
+        private readonly int[] days = { 7, 14, 30 };
+        private TypingStats stats;
+        private int range = 14;
+        private long peak;
+
+        internal StatsWindow(HostActions host) : base("打字统计", new Size(700, 610))
         {
-            var stats = host.Stats();
-            var layout = Theme.Layout(1, 28, 90, 38, 0, 28);
-            layout.Controls.Add(Theme.Label("截至 " + stats.Date.ToString("yyyy-MM-dd"), Theme.Small, Theme.Muted), 0, 0);
+            this.host = host;
+            var layout = Theme.Layout(1, 28, 82, 46, 0, 28);
+            layout.Controls.Add(summary, 0, 0);
             var metrics = Theme.Layout(4, 0);
-            var counts = new[] { stats.Today, stats.Week, stats.Month, stats.Total };
             var names = new[] { "今日", "本周", "本月", "总计" };
-            for (int i = 0; i < counts.Length; i++)
+            for (int i = 0; i < totals.Length; i++)
             {
                 var tile = Theme.Layout(1, 26, 0);
                 tile.BackColor = i == 0 ? Theme.Tint : Theme.Paper;
                 tile.Margin = new Padding(0, 2, 7, 5);
                 tile.Padding = new Padding(10, 5, 6, 5);
                 tile.Controls.Add(Theme.Label(names[i], Theme.Small, Theme.Muted), 0, 0);
-                tile.Controls.Add(Theme.Label(counts[i].ToString("N0"), Theme.Heading), 0, 1);
+                totals[i] = Theme.Label("", Theme.Heading);
+                tile.Controls.Add(totals[i], 0, 1);
                 metrics.Controls.Add(tile, i, 0);
             }
             layout.Controls.Add(metrics, 0, 1);
-            layout.Controls.Add(Theme.Label("最近 14 天"), 0, 2);
-            var rows = Theme.Grid();
+            var toolbar = Theme.Layout(5, 0);
+            toolbar.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 100);
+            toolbar.Controls.Add(Theme.Label("每日趋势"), 0, 0);
+            for (int i = 0; i < days.Length; i++)
+            {
+                int selected = days[i];
+                ranges[i] = new InkButton(selected + " 天");
+                ranges[i].Click += (sender, args) => { range = selected; RenderRange(); };
+                toolbar.ColumnStyles[i + 1] = new ColumnStyle(SizeType.Absolute, 66);
+                toolbar.Controls.Add(ranges[i], i + 1, 0);
+            }
+            var refresh = new InkButton("刷新");
+            refresh.Click += (sender, args) => Reload();
+            toolbar.ColumnStyles[4] = new ColumnStyle(SizeType.Absolute, 76);
+            toolbar.Controls.Add(refresh, 4, 0);
+            layout.Controls.Add(toolbar, 0, 2);
+            Tips.AddGrid(rows);
+            rows.AccessibleName = "每日打字统计";
             rows.Columns.Add("date", "日期");
             rows.Columns.Add("count", "字数");
+            rows.Columns.Add("trend", "趋势");
+            rows.Columns[0].FillWeight = 28;
+            rows.Columns[1].FillWeight = 24;
+            rows.Columns[2].FillWeight = 48;
             rows.Columns[1].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
-            for (int offset = 0; offset < 14; offset++)
+            rows.CellPainting += DrawBar;
+            layout.Controls.Add(rows, 0, 3);
+            layout.Controls.Add(footer, 0, 4);
+            Body.Controls.Add(layout);
+            Reload();
+        }
+
+        private void Reload()
+        {
+            stats = host.Stats();
+            var counts = new[] { stats.Today, stats.Week, stats.Month, stats.Total };
+            for (int i = 0; i < totals.Length; i++)
+                totals[i].Text = counts[i].ToString("N0");
+            summary.Text = "截至 " + stats.Date.ToString("yyyy-MM-dd");
+            RenderRange();
+        }
+
+        private void RenderRange()
+        {
+            for (int i = 0; i < ranges.Length; i++)
             {
-                var day = stats.Date.AddDays(-offset);
-                rows.Rows.Add(day.ToString("yyyy-MM-dd"), stats.On(day).ToString("N0"));
+                var button = ranges[i];
+                button.Selected = days[i] == range;
+                button.AccessibleDescription = button.Selected ? "当前时间范围" : "";
+                button.Invalidate();
+            }
+            var dates = Enumerable.Range(0, range).Select(offset => stats.Date.AddDays(-offset)).ToArray();
+            peak = dates.Select(day => stats.On(day)).Max();
+            rows.Rows.Clear();
+            foreach (DateTime day in dates)
+            {
+                long count = stats.On(day);
+                int row = rows.Rows.Add(day.ToString("yyyy-MM-dd"), count.ToString("N0"), "");
+                rows.Rows[row].Tag = count;
             }
             rows.ClearSelection();
-            layout.Controls.Add(rows, 0, 3);
-            layout.Controls.Add(Theme.Label(stats.Days.Count == 0 ? "暂无打字记录" : "本周从星期一开始", Theme.Small, Theme.Muted), 0, 4);
-            Body.Controls.Add(layout);
+            footer.Text = peak == 0 ? "这段时间暂无打字记录" : "近 " + range + " 天 · 单日最高 " + peak.ToString("N0") + " 字";
+        }
+
+        private void DrawBar(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex != 2 || peak == 0 ||
+                !(rows.Rows[e.RowIndex].Tag is long) || (long)rows.Rows[e.RowIndex].Tag == 0)
+                return;
+            e.PaintBackground(e.ClipBounds, true);
+            var bar = Rectangle.Inflate(e.CellBounds, -Theme.Scale(10, DeviceDpi), -Theme.Scale(8, DeviceDpi));
+            if (bar.Width > 0 && bar.Height > 0)
+            {
+                bar.Width = Math.Max(2, (int)Math.Round(bar.Width * ((long)rows.Rows[e.RowIndex].Tag / (double)peak)));
+                using (var brush = new SolidBrush(Theme.Accent))
+                using (var path = Theme.Rounded(bar, bar.Height / 2))
+                    e.Graphics.FillPath(brush, path);
+            }
+            e.Paint(e.ClipBounds, DataGridViewPaintParts.Border | DataGridViewPaintParts.Focus);
+            e.Handled = true;
         }
     }
 
@@ -133,6 +144,7 @@ namespace HanLin.Tools
 
         internal WordWindow(HostActions host) : base("词库管理", new Size(860, 546))
         {
+            Tips.AddGrid(table);
             this.host = host;
             host.Words.Seed(Path.Combine(host.Preset, "custom_phrase.txt"));
             var layout = Theme.Layout(1, 43, 0, 47);
@@ -143,6 +155,7 @@ namespace HanLin.Tools
             top.Controls.Add(Theme.Label("查找词条或编码", Theme.Small, Theme.Muted), 0, 0);
             top.Controls.Add(search, 1, 0);
             var reload = new InkButton("重新读取");
+            Tips.Add(reload, "从数据文件夹重新读取自定义词条");
             reload.Click += (sender, args) => Act(Reload);
             top.Controls.Add(reload, 2, 0);
             layout.Controls.Add(top, 0, 0);
@@ -191,6 +204,7 @@ namespace HanLin.Tools
             footer.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 106);
             footer.Controls.Add(status, 0, 0);
             var deploy = new InkButton("一键部署", true);
+            Tips.Add(deploy, "应用已保存的词条和输入方案配置");
             deploy.Click += async (sender, args) => await DeployWords();
             footer.Controls.Add(deploy, 1, 0);
             layout.Controls.Add(footer, 0, 2);
@@ -324,7 +338,7 @@ namespace HanLin.Tools
             appearance.Controls.Add(Theme.Label("基准字号 · 16 px，随 Windows 显示缩放"), 0, 3);
             appearance.Controls.Add(Theme.Label("已有本机皮肤会优先加载。", Theme.Small, Theme.Muted), 0, 4);
 
-            var data = AddSection(tabs, "数据", 24, 34, 44, 34, 0);
+            var data = AddSection(tabs, "数据", 24, 34, 44, 32, 42, 0);
             data.Controls.Add(Theme.Label("数据文件夹", Theme.Small, Theme.Muted), 0, 0);
             var directory = Theme.Field("数据文件夹");
             directory.ReadOnly = true;
@@ -341,6 +355,13 @@ namespace HanLin.Tools
             Add(buttons, 1, "编辑进阶配置…", () => Edit(host, "hanlin.custom.yaml"));
             data.Controls.Add(buttons, 0, 2);
             data.Controls.Add(Theme.Label("这里保存用户词库、方案配置和本地打字统计。", Theme.Small, Theme.Muted), 0, 3);
+            var cloudRow = Theme.Layout(2, 0);
+            cloudRow.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, 152);
+            cloudRow.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 100);
+            var cloud = new InkButton("云同步…");
+            cloud.Click += (sender, args) => { using (var window = new SyncWindow(host)) window.ShowDialog(this); };
+            cloudRow.Controls.Add(cloud, 0, 0);
+            data.Controls.Add(cloudRow, 0, 4);
 
             var about = AddSection(tabs, "关于", 30, 26, 34, 0);
             about.Controls.Add(Theme.Label("寒淋输入法", Theme.Heading), 0, 0);
@@ -370,6 +391,7 @@ namespace HanLin.Tools
         private void Add(TableLayoutPanel row, int column, string title, System.Action action)
         {
             var button = new InkButton(title);
+            Tips.Add(button, title == "打开数据文件夹" ? "在资源管理器中打开用户数据目录" : "用文本编辑器打开配置文件");
             button.Click += (sender, args) =>
             {
                 try { action(); }

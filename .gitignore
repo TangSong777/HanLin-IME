@@ -58,3 +58,6 @@ reference/**/.github/
 
 
 *.bak-*
+
+# Local public dictionary build inputs, kept outside Git.
+/.local-build-inputs/
