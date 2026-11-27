@@ -199,14 +199,22 @@ namespace HanLin.Tools
             panes.Controls.Add(editor, 1, 0);
             layout.Controls.Add(panes, 0, 1);
 
-            var footer = Theme.Layout(2, 0);
+            var footer = Theme.Layout(4, 0);
             footer.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 100);
-            footer.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 106);
+            footer.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 86);
+            footer.ColumnStyles[2] = new ColumnStyle(SizeType.Absolute, 86);
+            footer.ColumnStyles[3] = new ColumnStyle(SizeType.Absolute, 106);
             footer.Controls.Add(status, 0, 0);
+            var importWords = new InkButton("导入词条…");
+            importWords.Click += async (sender, args) => await TransferWords(true);
+            footer.Controls.Add(importWords, 1, 0);
+            var exportWords = new InkButton("导出词条…");
+            exportWords.Click += async (sender, args) => await TransferWords(false);
+            footer.Controls.Add(exportWords, 2, 0);
             var deploy = new InkButton("一键部署", true);
             Tips.Add(deploy, "应用已保存的词条和输入方案配置");
             deploy.Click += async (sender, args) => await DeployWords();
-            footer.Controls.Add(deploy, 1, 0);
+            footer.Controls.Add(deploy, 3, 0);
             layout.Controls.Add(footer, 0, 2);
             Body.Controls.Add(layout);
             search.TextChanged += (sender, args) => RenderRows();
@@ -277,6 +285,46 @@ namespace HanLin.Tools
             RenderRows();
             SelectWord(null);
             ShowStatus(remove ? "词条已删除，部署后生效。" : "词条已保存，部署后生效。");
+        }
+
+        private async Task TransferWords(bool importing)
+        {
+            string path;
+            const string filters = "UTF-8 词条文件 (*.txt;*.tsv)|*.txt;*.tsv";
+            using (FileDialog picker = importing ? (FileDialog)new OpenFileDialog() :
+                new SaveFileDialog { FileName = "HanLin-词条.txt", DefaultExt = "txt" })
+            {
+                picker.Filter = filters;
+                if (picker.ShowDialog(this) != DialogResult.OK) return;
+                path = picker.FileName;
+            }
+            busy = true;
+            Body.Enabled = false;
+            ShowStatus(importing ? "正在校验词条…" : "正在导出词条…");
+            try
+            {
+                if (!importing)
+                {
+                    int exported = await Task.Run(() => host.Words.Export(path));
+                    ShowStatus("已导出 " + exported + " 条不重复的词条。");
+                    return;
+                }
+                var plan = await Task.Run(() => host.Words.PreviewImport(path));
+                string skipped = "跳过重复 " + plan.DuplicateCount + " 条，权重冲突 " + plan.ConflictCount + " 条。";
+                if (plan.Additions.Length == 0) { ShowStatus("没有新词条。" + skipped); return; }
+                if (!Notice.Confirm(this, "导入词条", "新增 " + plan.Additions.Length + " 条。" +
+                    skipped + "\r\n保留现有词条，写入前会备份。", "导入"))
+                {
+                    ShowStatus("已取消导入。");
+                    return;
+                }
+                snapshot = await Task.Run(() => host.Words.ApplyImport(plan));
+                RenderRows();
+                SelectWord(null);
+                ShowStatus("新增 " + plan.Additions.Length + " 条，部署后生效。" + skipped);
+            }
+            catch (Exception error) { ShowStatus(error.Message, true); }
+            finally { Body.Enabled = true; busy = false; }
         }
 
         private async Task DeployWords()

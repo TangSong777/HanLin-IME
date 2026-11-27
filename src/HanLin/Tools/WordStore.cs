@@ -41,6 +41,22 @@ namespace HanLin.Tools
         }
     }
 
+    internal sealed class WordImport
+    {
+        internal readonly string Revision;
+        internal readonly string[] Additions;
+        internal readonly int DuplicateCount;
+        internal readonly int ConflictCount;
+
+        internal WordImport(string revision, List<string> additions, int duplicates, int conflicts)
+        {
+            Revision = revision;
+            Additions = additions.ToArray();
+            DuplicateCount = duplicates;
+            ConflictCount = conflicts;
+        }
+    }
+
     internal sealed class WordStore
     {
         private static readonly Regex Entry = new Regex(@"^([^#\t][^\t]*)\t([^\t]+)(\t.*)?$");
@@ -102,6 +118,83 @@ namespace HanLin.Tools
             if (revision != null && snapshot.Revision != revision)
                 throw new InvalidOperationException("词表已在别处更新，请重新读取。");
             return snapshot;
+        }
+
+        private static void ValidateTransferRow(WordEntry row, int number)
+        {
+            int weight;
+            if (string.IsNullOrWhiteSpace(row.Word) || string.IsNullOrWhiteSpace(row.Code) ||
+                (row.Word + row.Code + row.Suffix).IndexOf('\0') >= 0 ||
+                (row.Weight.Length != 0 && !int.TryParse(row.Weight, NumberStyles.None, CultureInfo.InvariantCulture, out weight)))
+                throw new InvalidDataException("第 " + number + " 行词条、编码或权重无效。");
+        }
+
+        internal WordImport PreviewImport(string path)
+        {
+            var snapshot = Read();
+            var known = snapshot.Entries.ToDictionary(row => row.Key, StringComparer.Ordinal);
+            var additions = new List<string>();
+            int duplicates = 0, conflicts = 0, number = 0;
+            // Decode the entire input strictly before producing any write plan.
+            var text = Utf8.GetString(File.ReadAllBytes(path)).TrimStart('\uFEFF');
+            using (var input = new StringReader(text))
+            {
+                string line;
+                while ((line = input.ReadLine()) != null)
+                {
+                    number++;
+                    if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#", StringComparison.Ordinal))
+                        continue;
+                    var row = Rows(new[] { line }).FirstOrDefault();
+                    if (row == null) throw new InvalidDataException("第 " + number + " 行应使用 Tab 分隔词条与编码。");
+                    ValidateTransferRow(row, number);
+                    WordEntry previous;
+                    if (known.TryGetValue(row.Key, out previous))
+                    {
+                        if (previous.Suffix == row.Suffix) duplicates++;
+                        else conflicts++;
+                        continue;
+                    }
+                    known.Add(row.Key, row);
+                    additions.Add(row.Word + "\t" + row.Code + row.Suffix);
+                }
+            }
+            return new WordImport(snapshot.Revision, additions, duplicates, conflicts);
+        }
+
+        internal WordSnapshot ApplyImport(WordImport import)
+        {
+            return Locked(() =>
+            {
+                var snapshot = CheckedRead(import.Revision);
+                if (import.Additions.Length == 0) return snapshot;
+                if (File.Exists(Pathname))
+                {
+                    var original = File.ReadAllBytes(Pathname);
+                    if (Hash(original) != snapshot.Revision)
+                        throw new InvalidOperationException("词表已在别处更新，请重新导入。");
+                    var backup = Path.Combine(Path.GetDirectoryName(Pathname), "hanlin-word-backups",
+                        "import-" + Guid.NewGuid().ToString("N"), "custom_phrase.txt");
+                    Write(backup, original);
+                }
+                Write(Pathname, EncodeLines(snapshot.Lines.Concat(import.Additions)));
+                return Read();
+            });
+        }
+
+        internal int Export(string path)
+        {
+            if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(Pathname), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("请选择个人词表之外的导出位置。");
+            var snapshot = Read();
+            var lines = new List<string> { "# HanLin 自定义词条", "# UTF-8 · 词条、编码、权重以 Tab 分隔" };
+            foreach (var entry in snapshot.Entries)
+            {
+                ValidateTransferRow(entry, entry.Line + 1);
+                lines.Add(entry.Word + "\t" + entry.Code + entry.Suffix);
+            }
+            Write(path, EncodeLines(lines));
+            return snapshot.Entries.Length;
         }
 
         internal WordSnapshot Edit(string revision, string originalKey, bool remove,
