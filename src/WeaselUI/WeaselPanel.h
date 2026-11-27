@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <optional>
 #include <WeaselIPCData.h>
 #include <WeaselUI.h>
 #include "StandardLayout.h"
@@ -186,6 +187,7 @@ class WeaselPanel
   std::wstring ssf_skin_dir_;
   weasel::ssf::SsfRenderer ssf_renderer_;
   weasel::ssf::SsfLayoutAdapter* ssf_adapter_ = nullptr;
+  std::optional<float> ssf_caret_x_;
   // Per-kind text formats: PINYIN, CANDIDATE, LABEL, COMMENT.
   ComPtr<IDWriteTextFormat1> ssf_formats_[4];
   int ssf_format_point_[4] = {0, 0, 0, 0};

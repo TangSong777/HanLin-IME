@@ -275,6 +275,7 @@ void WeaselPanel::_CreateLayout() {
   if (m_layout != NULL)
     delete m_layout;
   ssf_adapter_ = nullptr;
+  ssf_caret_x_.reset();
 
   Layout* layout = NULL;
 
@@ -428,6 +429,7 @@ void WeaselPanel::_InitFontRes(bool forced) {
   // resources
   if (forced || (pDWR == NULL) || (m_ostyle != m_style) || (dpiX != dpi)) {
     _ResetCaretMotion();
+    ssf_caret_x_.reset();
     pDWR.reset();
     // SSF measures and draws with its own formats, including its GDI fallback.
     pDWR = std::make_shared<DirectWriteResources>(m_style, dpiX, !SsfActive());
@@ -2331,25 +2333,28 @@ void WeaselPanel::_SsfDrawText(CDCHandle memDC) {
   const weasel::TextRange preedit_range = ssf_adapter_->GetPreeditRange();
   if (!rtext.pinyin.empty() && !L.pinyin_text.Empty() &&
       preedit_range.cursor >= 0) {
-    const size_t cursor = (std::min)(
-        static_cast<size_t>(preedit_range.cursor), rtext.pinyin.size());
-    float caret_advance = 0, caret_y = 0;
-    DWRITE_HIT_TEST_METRICS hit = {};
-    auto caret_layout = _SsfTextLayout(rtext.pinyin, weasel::ssf::ITextMeasurer::PINYIN);
-    if (caret_layout && SUCCEEDED(caret_layout->HitTestTextPosition(
-        static_cast<UINT32>(cursor), FALSE, &caret_advance, &caret_y, &hit))) {
-      caret_advance = _BalanceCaretGap(caret_layout.Get(),
-          ssf_formats_[weasel::ssf::ITextMeasurer::PINYIN].Get(),
-          rtext.pinyin, static_cast<UINT32>(cursor), caret_advance, caret_y, hit);
-    } else {
-      caret_advance = static_cast<float>(_SsfMeasure(rtext.pinyin.substr(0, cursor),
-          weasel::ssf::ITextMeasurer::PINYIN).cx);
+    // Animation-only redraws reuse the layout and its caret target.
+    if (!ssf_caret_x_) {
+      const auto cursor = (std::min)(
+          static_cast<size_t>(preedit_range.cursor), rtext.pinyin.size());
+      float advance = 0, y = 0;
+      DWRITE_HIT_TEST_METRICS hit = {};
+      auto layout = _SsfTextLayout(rtext.pinyin, weasel::ssf::ITextMeasurer::PINYIN);
+      if (layout && SUCCEEDED(layout->HitTestTextPosition(
+          static_cast<UINT32>(cursor), FALSE, &advance, &y, &hit))) {
+        advance = _BalanceCaretGap(layout.Get(),
+            ssf_formats_[weasel::ssf::ITextMeasurer::PINYIN].Get(),
+            rtext.pinyin, static_cast<UINT32>(cursor), advance, y, hit);
+      } else {
+        advance = static_cast<float>(_SsfMeasure(rtext.pinyin.substr(0, cursor),
+            weasel::ssf::ITextMeasurer::PINYIN).cx);
+      }
+      DWRITE_OVERHANG_METRICS overhang = {};
+      if (layout) layout->GetOverhangMetrics(&overhang);
+      ssf_caret_x_ = (std::min)(static_cast<float>(L.pinyin_text.right),
+          L.pinyin_text.left + advance + (std::max)(0.0f, overhang.left));
     }
-    DWRITE_OVERHANG_METRICS overhang = {};
-    if (caret_layout) caret_layout->GetOverhangMetrics(&overhang);
-    const float x = (std::min)(static_cast<float>(L.pinyin_text.right),
-        L.pinyin_text.left + caret_advance + (std::max)(0.0f, overhang.left));
-    _DrawCaret(x, static_cast<float>(L.pinyin_text.top), static_cast<float>(L.pinyin_text.bottom),
+    _DrawCaret(*ssf_caret_x_, static_cast<float>(L.pinyin_text.top), static_cast<float>(L.pinyin_text.bottom),
                ToD2DColor(skin.pinyin_color));
   }
   draw(L.aux_text, rtext.aux, skin.comphint_color,

@@ -16,7 +16,7 @@ namespace HanLin.Tools
         private readonly TableLayoutPanel pairing;
         private bool paired, busy;
 
-        internal SyncWindow(HostActions host) : base("云同步", new Size(500, 300))
+        internal SyncWindow(HostActions host) : base("云同步", new Size(500, 344))
         {
             this.host = host;
             Text = "寒淋输入法 · 云同步";
@@ -24,7 +24,7 @@ namespace HanLin.Tools
             paired = saved != null;
             server.Text = saved ?? "https://sync.yanghanlin.cn";
             code.MaskInput();
-            Body.Padding = new Padding(22, 15, 22, 14);
+            Body.Padding = new Padding(24, 16, 24, 18);
             var layout = Theme.Layout(1, 48, 98, 0, 36);
             layout.Controls.Add(status, 0, 0);
             pairing = Theme.Layout(1, 18, 29, 18, 29);
@@ -38,11 +38,12 @@ namespace HanLin.Tools
             layout.Controls.Add(hint, 0, 2);
             var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             primary.Click += (sender, args) => ActivateAction();
+            AcceptButton = primary;
             footer.Controls.Add(primary);
             layout.Controls.Add(footer, 0, 3);
             Body.Controls.Add(layout);
             SetPairing(paired);
-            Shown += (sender, args) => { if (paired) Run("status"); };
+            Shown += (sender, args) => { if (paired) Run("status"); else code.Focus(); };
         }
 
         private void SetPairing(bool enabled)
@@ -109,6 +110,7 @@ namespace HanLin.Tools
             {
                 busy = false;
                 primary.Enabled = pairing.Enabled = true;
+                if (!paired) code.Focus();
             }
         }
     }
