@@ -357,10 +357,26 @@ namespace HanLin.Tools
             data.Controls.Add(Theme.Label("这里保存用户词库、方案配置和本地打字统计。", Theme.Small, Theme.Muted), 0, 3);
             var cloudRow = Theme.Layout(2, 0);
             cloudRow.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, 152);
-            cloudRow.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 100);
+            cloudRow.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 216);
             var cloud = new InkButton("云同步…");
             cloud.Click += (sender, args) => { using (var window = new SyncWindow(host)) window.ShowDialog(this); };
             cloudRow.Controls.Add(cloud, 0, 0);
+            var autoSync = new InkButton(host.AutoSyncEnabled ? "每日自动同步：开启" : "每日自动同步：关闭");
+            autoSync.Click += (sender, args) =>
+            {
+                try
+                {
+                    host.SetAutoSync(!host.AutoSyncEnabled);
+                    autoSync.Text = host.AutoSyncEnabled ? "每日自动同步：开启" : "每日自动同步：关闭";
+                    autoSync.AccessibleName = autoSync.Text;
+                }
+                catch (Exception error)
+                {
+                    if (!(error is IOException) && !(error is UnauthorizedAccessException)) throw;
+                    Notice.Show(this, "无法保存自动同步设置", error.Message);
+                }
+            };
+            cloudRow.Controls.Add(autoSync, 1, 0);
             data.Controls.Add(cloudRow, 0, 4);
 
             var about = AddSection(tabs, "关于", 30, 26, 34, 0);

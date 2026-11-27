@@ -53,6 +53,20 @@ namespace HanLin.Tools
             }
         }
 
+        private string AutoSyncFlag { get { return Path.Combine(DirectoryPath, ".hanlin-auto-sync-off"); } }
+
+        internal bool AutoSyncEnabled { get { return !File.Exists(AutoSyncFlag); } }
+
+        internal void SetAutoSync(bool enabled)
+        {
+            if (enabled) File.Delete(AutoSyncFlag);
+            else
+            {
+                Directory.CreateDirectory(DirectoryPath);
+                using (File.Open(AutoSyncFlag, FileMode.OpenOrCreate, FileAccess.Write)) { }
+            }
+        }
+
         internal Tuple<int, string> CloudSync(string action, string server, string name, string code, string commit)
         {
             string script = Path.Combine(Path.GetDirectoryName(executable), "Sync-HanLin.ps1");
@@ -62,6 +76,11 @@ namespace HanLin.Tools
                 "-Server", server, "-DeviceName", name };
             if (commit != null) { args.Add("-Commit"); args.Add(commit); }
             if (code != null) args.Add("-PairFromStdin");
+            if (action == "sync")
+            {
+                args.Add("-Live");
+                if (!noTray) args.Add("-ResumeTray");
+            }
             string pwsh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
                 "PowerShell", "7", "pwsh.exe");
             if (!File.Exists(pwsh)) pwsh = "pwsh.exe";

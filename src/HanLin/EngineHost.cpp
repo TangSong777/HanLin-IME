@@ -9,6 +9,8 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -21,8 +23,11 @@ namespace {
 
 constexpr wchar_t kHostWindowClass[] = L"HanLinEngineHost";
 constexpr UINT kPresent = WM_APP + 1;
+constexpr UINT kPauseForSync = WM_APP + 2;
 constexpr UINT_PTR kSweepSessions = 1;
+constexpr UINT_PTR kCheckAutoSync = 2;
 constexpr UINT kSessionSweepInterval = 60000;
+constexpr UINT kAutoSyncCheckInterval = 120000;
 constexpr char kSchema[] = "rime_ice";
 constexpr wchar_t kDataRevision[] = L"hanlin-data.revision";
 constexpr ULONGLONG kSessionIdleTime = 5 * 60 * 1000;
@@ -142,7 +147,12 @@ int EnableUserProfile() {
   return enabled ? 0 : 1;
 }
 
-int StopRunningHost() {
+bool InputIsIdle() {
+  LASTINPUTINFO input{sizeof(input)};
+  return GetLastInputInfo(&input) && GetTickCount() - input.dwTime >= kAutoSyncCheckInterval;
+}
+
+int StopRunningHost(bool only_if_idle = false) {
   auto window = FindWindowW(kHostWindowClass, nullptr);
   if (!window) window = FindWindowExW(HWND_MESSAGE, nullptr, kHostWindowClass, nullptr);
   if (!window) return 0;
@@ -150,8 +160,16 @@ int StopRunningHost() {
   GetWindowThreadProcessId(window, &process_id);
   const auto process = OpenProcess(SYNCHRONIZE, FALSE, process_id);
   if (!process) return 1;
-  PostMessageW(window, WM_CLOSE, 0, 0);
-  const auto wait = WaitForSingleObject(process, 5000);
+  if (only_if_idle) {
+    DWORD_PTR allowed = 0;
+    if (!SendMessageTimeoutW(window, kPauseForSync, 0, 0, SMTO_ABORTIFHUNG, 1000, &allowed) || !allowed) {
+      CloseHandle(process);
+      return 4;
+    }
+  } else {
+    PostMessageW(window, WM_CLOSE, 0, 0);
+  }
+  const auto wait = WaitForSingleObject(process, only_if_idle ? 15000 : 5000);
   CloseHandle(process);
   return wait == WAIT_OBJECT_0 ? 0 : 1;
 }
@@ -252,6 +270,10 @@ class EngineHost {
   void AttachWindow(HWND window, HINSTANCE image, const fs::path& directory,
                     const std::wstring& shared, const std::wstring& personal, bool enable_tray) {
     window_ = window;
+    install_directory_ = directory;
+    shared_directory_ = shared;
+    show_tray_ = enable_tray;
+    SetTimer(window, kCheckAutoSync, kAutoSyncCheckInterval, nullptr);
     ReadStyle();
     ui_.InServer() = true;
     ui_.SetUICallBack([this](size_t* select, size_t* highlight, bool* backward, bool* scroll) {
@@ -275,6 +297,56 @@ class EngineHost {
   }
 
   void CloseTray() { tray_.reset(); }
+
+  bool PauseForSync() {
+    if (!InputIsIdle() || frame_.composing) return false;
+    return PostMessageW(window_, WM_CLOSE, 0, 0) != FALSE;
+  }
+
+  void CheckAutoSync() {
+    if (!InputIsIdle() || frame_.composing) return;
+    std::error_code error;
+    if (!fs::is_regular_file(personal_ / L".hanlin-sync.json", error) ||
+        fs::exists(personal_ / L".hanlin-auto-sync-off", error) || error)
+      return;
+    SYSTEMTIME today{};
+    GetLocalTime(&today);
+    char day[12]{};
+    sprintf_s(day, "%04u-%02u-%02u", static_cast<unsigned>(today.wYear),
+              static_cast<unsigned>(today.wMonth), static_cast<unsigned>(today.wDay));
+    std::ifstream stamp(personal_ / L".hanlin-auto-sync-day");
+    std::string last;
+    if (std::getline(stamp, last) && last == day) return;
+    stamp.close();
+    const auto attempted = fs::last_write_time(personal_ / L".hanlin-auto-sync-attempt", error);
+    if (!error && fs::file_time_type::clock::now() - attempted < std::chrono::minutes(10)) return;
+    const auto script = install_directory_ / L"Sync-HanLin.ps1";
+    if (!fs::is_regular_file(script, error)) return;
+    wchar_t programs[MAX_PATH]{};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PROGRAM_FILES, nullptr, SHGFP_TYPE_CURRENT, programs)))
+      return;
+    auto pwsh = fs::path(programs) / L"PowerShell" / L"7" / L"pwsh.exe";
+    if (!fs::is_regular_file(pwsh, error)) {
+      wchar_t local[MAX_PATH]{};
+      if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, local)))
+        return;
+      pwsh = fs::path(local) / L"Microsoft" / L"WindowsApps" / L"pwsh.exe";
+      if (GetFileAttributesW(pwsh.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    }
+    const auto quote = [](const std::wstring& arg) { return L"\"" + arg + L"\""; };
+    auto arguments = quote(pwsh.wstring()) + L" -NoProfile -NonInteractive -File " +
+        quote(script.wstring()) + L" sync -Automatic -UserData " + quote(personal_.wstring()) +
+        L" -HostPath " + quote((install_directory_ / L"HanLinHost.exe").wstring()) +
+        L" -SharedData " + quote(shared_directory_);
+    if (show_tray_) arguments += L" -ResumeTray";
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION process{};
+    if (CreateProcessW(pwsh.c_str(), arguments.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                       nullptr, install_directory_.c_str(), &startup, &process)) {
+      CloseHandle(process.hThread);
+      CloseHandle(process.hProcess);
+    }
+  }
 
   State& Dispatch(const Request& request, DWORD process, State& reply) {
     if (request.command == Command::Health) {
@@ -648,6 +720,9 @@ class EngineHost {
   }
 
   fs::path personal_;
+  fs::path install_directory_;
+  std::wstring shared_directory_;
+  bool show_tray_ = false;
   HMODULE module_ = nullptr;
   RimeApi* api_ = nullptr;
   bool setup_ = false;
@@ -677,6 +752,11 @@ LRESULT CALLBACK HostWindow(HWND window, UINT message, WPARAM word, LPARAM data)
     return 0;
   }
   if (engine && engine->HandleTrayMessage(message, word, data)) return 0;
+  if (message == kPauseForSync) return engine && engine->PauseForSync();
+  if (message == WM_TIMER && word == kCheckAutoSync) {
+    if (engine) engine->CheckAutoSync();
+    return 0;
+  }
   if (message == kPresent || (message == WM_TIMER && word == kSweepSessions)) {
     if (engine) {
       if (message == kPresent) engine->PresentPending();
@@ -948,7 +1028,7 @@ int RunHost(HINSTANCE image) {
     if (SUCCEEDED(initialized)) CoUninitialize();
     return result;
   }
-  bool stop = false;
+  bool stop = false, idle_stop = false;
   bool deploy = false;
   bool desktop_update = false;
   bool enable_tray = false;
@@ -956,6 +1036,7 @@ int RunHost(HINSTANCE image) {
   for (int i = 1; i < count; ++i) {
     const std::wstring_view key(args[i]);
     if (key == L"--stop") stop = true;
+    else if (key == L"--stop-idle") idle_stop = true;
     else if (key == L"--deploy") deploy = true;
     else if (key == L"--activate-desktop-update") desktop_update = true;
     else if (key == L"--no-tray") enable_tray = false;
@@ -968,6 +1049,7 @@ int RunHost(HINSTANCE image) {
   LocalFree(args);
   if (!valid || (stop && deploy) || (desktop_update && (stop || deploy))) return 2;
   if (stop) return StopRunningHost();
+  if (idle_stop) return StopRunningHost(true);
   if (!sync_user.empty()) {
     // One-shot user dictionary sync: explicit profile, no desktop host involvement.
     const fs::path profile(sync_user);

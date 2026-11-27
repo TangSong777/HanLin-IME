@@ -59,10 +59,14 @@ param(
   [string]$Commit,
   [switch]$IncludeConfig,
   [switch]$Force,
-  [switch]$PairFromStdin
+  [switch]$PairFromStdin,
+  [switch]$Automatic,
+  [switch]$Live,
+  [switch]$ResumeTray
 )
 
 $guard = $null
+$jobGuard = $null
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -82,6 +86,66 @@ function Write-Step([string]$Text) { Write-Host "== $Text" -ForegroundColor Cyan
 
 function Fail([string]$Text) {
   throw [InvalidOperationException]::new($Text)
+}
+
+function Invoke-WithProfileAccess {
+  param([scriptblock]$Operation, [switch]$NoWrites)
+  if ($guard -or $NoWrites) { return & $Operation }
+  $lock = Join-Path $UserData '.hanlin-sync-operation.lock'
+  Assert-RegularPath $lock
+  $lease = $null
+  $update = $null
+  $maintenance = $null
+  $resume = $false
+  try {
+    if ($Automatic -and (Test-Path -LiteralPath (Join-Path $UserData '.hanlin-auto-sync-off'))) {
+      Fail '自动同步已关闭。'
+    }
+    try {
+      $lease = [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
+    } catch [IO.IOException] {
+      if (-not ($Automatic -or $Live)) { throw }
+      $exe = Resolve-HostPath
+      $runtimeLock = Join-Path (Split-Path -Parent $exe) '.hanlin-update.lock'
+      if (Test-Path -LiteralPath $runtimeLock) {
+        $update = [IO.File]::Open($runtimeLock, 'Open', 'ReadWrite', 'None')
+      }
+      $session = (Get-Process -Id $PID).SessionId
+      $hosts = @(Get-Process -Name HanLinHost -ErrorAction SilentlyContinue |
+        Where-Object { $_.SessionId -eq $session -and $_.Path -ieq $exe })
+      if ($hosts.Count -ne 1) { Fail '输入法正在切换，本次暂缓。' }
+      $created = $false
+      $maintenance = [Threading.EventWaitHandle]::new(
+        $false, 'ManualReset', 'Local\HanLinMaintenance', [ref]$created)
+      if (-not $created) { Fail '输入法正在维护，本次暂缓。' }
+      $stopArg = if ($Automatic) { '--stop-idle' } else { '--stop' }
+      $stop = Start-Process -FilePath $exe -ArgumentList $stopArg -WindowStyle Hidden -Wait -PassThru
+      if ($stop.ExitCode -ne 0) { Fail '输入法正在使用，本次暂缓。' }
+      $resume = $true
+      $lease = [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
+    }
+    & $Operation
+  } finally {
+    if ($lease) { $lease.Dispose() }
+    try {
+      if ($resume) {
+        $start = [Diagnostics.ProcessStartInfo]::new($exe)
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        foreach ($arg in @('--user-data', $UserData, '--shared-data', (Resolve-SharedData $exe))) {
+          $start.ArgumentList.Add($arg)
+        }
+        if ($ResumeTray) { $start.ArgumentList.Add('--show-tray') }
+        $restarted = [Diagnostics.Process]::Start($start)
+        try {
+          if ($restarted.WaitForExit(1000)) { Fail '后台同步后输入法未能重新启动。' }
+        } finally { $restarted.Dispose() }
+      }
+    } finally {
+      if ($maintenance) { $maintenance.Dispose() }
+      if ($update) { $update.Dispose() }
+    }
+  }
 }
 
 function Get-InstallationId {
@@ -449,12 +513,15 @@ function Invoke-Pair {
   Write-Host ("已配对：设备 " + $body.deviceId + "（" + $DeviceName + "）。令牌已用 DPAPI 保存在 " + $script:CredFile)
 }
 
-function Invoke-Push {
+function Invoke-Push([switch]$UseFreshExport) {
   $state = Get-State
   if (-not $state) { Fail '尚未配对：先运行 pair。' }
   $installId = Get-InstallationId
   $null = Get-SyncFiles $installId -WordsOnly -AllowEmpty
-  $null = Invoke-HostSync
+  if (-not $UseFreshExport) {
+    $export = Invoke-WithProfileAccess { Invoke-HostSync -AllowEmpty:$Automatic }
+    if (-not $export -and $Automatic) { return }
+  }
   $files = @(Get-SyncFiles $installId -WordsOnly:(-not $IncludeConfig))
   Write-Step ("准备上传 " + $files.Count + " 个文件")
   $grouped = $files | ForEach-Object { $parts = $_.Path -split '/'; [pscustomobject]@{ Group = $(if ($parts.Count -gt 1) { $parts[0] } else { '(根目录)' }); Size = $_.Size } } | Group-Object Group | Sort-Object Name
@@ -555,7 +622,7 @@ function Backup-LocalSyncState([string]$Tag, [switch]$Full) {
   return $dir
 }
 
-function Invoke-Pull([string]$TargetCommit, [switch]$ApplyConfig) {
+function Invoke-Pull([string]$TargetCommit, [switch]$ApplyConfig, [ref]$FreshExport) {
   $state = Get-State
   if (-not $state) { Fail '尚未配对：先运行 pair。' }
   $installId = Get-InstallationId
@@ -613,58 +680,63 @@ function Invoke-Pull([string]$TargetCommit, [switch]$ApplyConfig) {
       $changed.Add($entry)
     }
 
-    if ($changed.Count -or $pending) {
-      $backup = Backup-LocalSyncState 'pull' -Full:$ApplyConfig
-      Write-Host "已备份本机词库：$backup"
-    }
-    $wordFiles = 0
-    foreach ($entry in $changed) {
-      $rel = [string]$entry.path
-      $path = $rel -replace '/', '\'
-      Copy-AtomicFile (Join-Path $stage $path) (Join-Path $profile $path)
-      $changes.Add($path)
-      if ($rel -like 'sync/*') { $wordFiles++ }
-    }
-    if ($wordFiles -or $pending) {
-      $null = Get-SyncFiles $installId -WordsOnly -AllowEmpty
-      $mergeAttempted = $true
-      $merged = Invoke-HostSync -AllowEmpty
-      if (-not $merged) {
-        $state | Add-Member -NotePropertyName pendingMerge -NotePropertyValue $true -Force
+    Invoke-WithProfileAccess -NoWrites:($changed.Count -eq 0 -and -not $pending) {
+      try {
+        if ($changed.Count -or $pending) {
+          $backup = Backup-LocalSyncState 'pull' -Full:$ApplyConfig
+          Write-Host "已备份本机词库：$backup"
+        }
+        $wordFiles = 0
+        foreach ($entry in $changed) {
+          $rel = [string]$entry.path
+          $path = $rel -replace '/', '\'
+          Copy-AtomicFile (Join-Path $stage $path) (Join-Path $profile $path)
+          $changes.Add($path)
+          if ($rel -like 'sync/*') { $wordFiles++ }
+        }
+        if ($wordFiles -or $pending) {
+          $null = Get-SyncFiles $installId -WordsOnly -AllowEmpty
+          $mergeAttempted = $true
+          $merged = Invoke-HostSync -AllowEmpty
+          if (-not $merged) {
+            $state | Add-Member -NotePropertyName pendingMerge -NotePropertyValue $true -Force
+            Save-State $state
+            Write-Host '词频已下载，等待合并。请先用本机输入法选词，再重新同步。'
+            return
+          }
+          if ($FreshExport) { $FreshExport.Value = $true }
+        }
+        $state.base = [string]$commit.id
+        $state | Add-Member -NotePropertyName pendingMerge -NotePropertyValue $false -Force
+        $state.lastSync = (Get-Date).ToString('o')
         Save-State $state
-        Write-Host '词频已下载，等待合并。请先用本机输入法选词，再重新同步。'
-        return
+        Write-Host ("已同步版本 " + $commit.id + "，本机安装标识保持原样。")
+      }
+      catch {
+        $failure = $_
+        if ($backup) {
+          foreach ($path in $changes) {
+            $original = Join-Path $backup $path
+            $destination = Join-Path $profile $path
+            if ([IO.File]::Exists($original)) { Copy-AtomicFile $original $destination }
+            else { [IO.File]::Delete($destination) }
+          }
+          if ($mergeAttempted) {
+            foreach ($entry in Get-ChildItem -LiteralPath $profile -Directory -Filter '*.userdb') {
+              $destination = $entry.FullName
+              Assert-RegularPath $destination
+              $park = $destination + ".failed-sync-" + [guid]::NewGuid().ToString('N')
+              [IO.Directory]::Move($destination, $park)
+            }
+            foreach ($entry in Get-ChildItem -LiteralPath $backup -Directory -Filter '*.userdb') {
+              $destination = Join-Path $profile $entry.Name
+              Copy-Item -LiteralPath $entry.FullName -Destination $destination -Recurse -Force
+            }
+          }
+        }
+        throw $failure
       }
     }
-    $state.base = [string]$commit.id
-    $state | Add-Member -NotePropertyName pendingMerge -NotePropertyValue $false -Force
-    $state.lastSync = (Get-Date).ToString('o')
-    Save-State $state
-    Write-Host ("已同步版本 " + $commit.id + "，本机安装标识保持原样。")
-  }
-  catch {
-    $failure = $_
-    if ($backup) {
-      foreach ($path in $changes) {
-        $original = Join-Path $backup $path
-        $destination = Join-Path $profile $path
-        if ([IO.File]::Exists($original)) { Copy-AtomicFile $original $destination }
-        else { [IO.File]::Delete($destination) }
-      }
-      if ($mergeAttempted) {
-        foreach ($entry in Get-ChildItem -LiteralPath $profile -Directory -Filter '*.userdb') {
-          $destination = $entry.FullName
-          Assert-RegularPath $destination
-          $park = $destination + ".failed-sync-" + [guid]::NewGuid().ToString('N')
-          [IO.Directory]::Move($destination, $park)
-        }
-        foreach ($entry in Get-ChildItem -LiteralPath $backup -Directory -Filter '*.userdb') {
-          $destination = Join-Path $profile $entry.Name
-          Copy-Item -LiteralPath $entry.FullName -Destination $destination -Recurse -Force
-        }
-      }
-    }
-    throw $failure
   }
   finally {
     if ([IO.Directory]::GetParent($stage).FullName -ieq $stageRoot -and [IO.Directory]::Exists($stage)) {
@@ -715,9 +787,38 @@ function Show-History {
 }
 
 try {
+  if ($Automatic) {
+    if ($Action -ne 'sync' -or $IncludeConfig) { Fail '后台只支持同步词频。' }
+    $auto = Get-State
+    if (-not $auto -or (Test-Path -LiteralPath (Join-Path $UserData '.hanlin-auto-sync-off'))) { return }
+    $script:Server = [string]$auto.server
+  }
   Assert-Https
+  if ($Action -notin 'status','history') {
+    Assert-RegularPath $UserData
+    $jobPath = Join-Path $UserData '.hanlin-sync-job.lock'
+    Assert-RegularPath $jobPath
+    try { $jobGuard = [IO.File]::Open($jobPath, 'OpenOrCreate', 'ReadWrite', 'None') }
+    catch [IO.IOException] {
+      if ($Automatic) { return }
+      Fail '已有同步操作正在运行。'
+    }
+  }
+  if ($Automatic) {
+    $autoDay = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    $dayPath = Join-Path $UserData '.hanlin-auto-sync-day'
+    $attemptPath = Join-Path $UserData '.hanlin-auto-sync-attempt'
+    Assert-RegularPath $dayPath
+    Assert-RegularPath $attemptPath
+    if (Test-Path -LiteralPath $dayPath) {
+      if ([IO.File]::ReadAllText($dayPath).Trim() -ceq $autoDay) { return }
+    }
+    if ((Test-Path -LiteralPath $attemptPath) -and
+        [DateTime]::UtcNow - [IO.File]::GetLastWriteTimeUtc($attemptPath) -lt [TimeSpan]::FromMinutes(10)) { return }
+    [IO.File]::WriteAllText($attemptPath, '')
+  }
   $guard = $null
-  if ($Action -in 'push','pull','restore','sync') {
+  if (-not ($Automatic -or $Live) -and $Action -in 'push','pull','restore','sync') {
     Assert-RegularPath $UserData
     try {
       $guard = [IO.File]::Open((Join-Path $UserData '.hanlin-sync-operation.lock'),
@@ -743,13 +844,21 @@ try {
     'sync' {
       $known = Get-State
       if (-not $known) { Fail '请先配对。' }
+      $freshExport = $false
       $latest = Get-RemoteHead
       if ($latest -and [string]$latest.id -cne [string]$known.base) {
-        Invoke-Pull
+        Invoke-Pull -FreshExport ([ref]$freshExport)
         $known = Get-State
         if ($known.PSObject.Properties['pendingMerge'] -and $known.pendingMerge) { break }
       }
-      Invoke-Push
+      Invoke-Push -UseFreshExport:$freshExport
+      if ($Automatic) {
+        $stamp = $dayPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+        try {
+          [IO.File]::WriteAllText($stamp, $autoDay)
+          [IO.File]::Move($stamp, $dayPath, $true)
+        } finally { [IO.File]::Delete($stamp) }
+      }
     }
     'history' { Show-History }
   }
@@ -760,4 +869,5 @@ catch {
 }
 finally {
   if ($guard) { $guard.Dispose() }
+  if ($jobGuard) { $jobGuard.Dispose() }
 }

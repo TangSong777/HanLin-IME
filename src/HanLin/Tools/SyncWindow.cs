@@ -33,7 +33,7 @@ namespace HanLin.Tools
             pairing.Controls.Add(Theme.Label("Authenticator 六位动态验证码", Theme.Small, Theme.Muted), 0, 2);
             pairing.Controls.Add(code, 0, 3);
             layout.Controls.Add(pairing, 0, 1);
-            var hint = Theme.Label("合并词频前会备份本机词库。服务器可以读取同步内容，换电脑后请重新配对。",
+            var hint = Theme.Label("自动同步每天一次，可在设置关闭。合并词频前会备份本机词库。",
                 Theme.Small, Theme.Muted);
             layout.Controls.Add(hint, 0, 2);
             var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
