@@ -17,14 +17,16 @@ constexpr UINT kAvoidCandidateMessage = WM_APP + 0x517;
 constexpr UINT_PTR kHoverTimer = 20261126;
 constexpr UINT_PTR kCaretTimer = 20261127;
 constexpr float kHoverDuration = 130.0f;
-constexpr float kCaretResponseMs = 22.0f;
+constexpr float kCaretDurationMs = 160.0f;
 constexpr float kCaretSettlePx = 0.125f;
 
-bool SamePreeditIgnoringSpaces(std::wstring_view old_text, std::wstring_view text) {
+bool SamePreeditIgnoringSeparators(std::wstring_view old_text, std::wstring_view text) {
+  // Rime can insert or remove syllable separators when only the caret moves.
+  const auto separator = [](wchar_t ch) { return ch == L' ' || ch == L'\''; };
   size_t old_index = 0, index = 0;
   while (true) {
-    while (old_index < old_text.size() && old_text[old_index] == L' ') ++old_index;
-    while (index < text.size() && text[index] == L' ') ++index;
+    while (old_index < old_text.size() && separator(old_text[old_index])) ++old_index;
+    while (index < text.size() && separator(text[index])) ++index;
     if (old_index == old_text.size() || index == text.size())
       return old_index == old_text.size() && index == text.size();
     if (old_text[old_index++] != text[index++]) return false;
@@ -330,7 +332,7 @@ void WeaselPanel::_CreateLayout() {
 void WeaselPanel::Refresh() {
   if (m_ctx.preedit.str != m_octx.preedit.str &&
       (m_ctx.preedit.str.empty() || m_octx.preedit.str.empty() ||
-       !SamePreeditIgnoringSpaces(m_octx.preedit.str, m_ctx.preedit.str)))
+       !SamePreeditIgnoringSeparators(m_octx.preedit.str, m_ctx.preedit.str)))
     _ResetCaretMotion();
   if (weasel::ssf::SuppressEmptyWindow(m_style.ssf_enabled, m_ctx.empty(),
                                        m_status.show_mode_tip)) {
@@ -818,7 +820,8 @@ void WeaselPanel::_ResetCaretMotion() {
 float WeaselPanel::_CaretPosition(ULONGLONG now) const {
   if (!caret_motion_start_) return caret_target_;
   const float elapsed = static_cast<float>(now - caret_motion_start_);
-  return caret_target_ + (caret_from_ - caret_target_) * std::exp(-elapsed / kCaretResponseMs);
+  const float remaining = 1.0f - (std::min)(1.0f, elapsed / kCaretDurationMs);
+  return caret_target_ + (caret_from_ - caret_target_) * remaining * remaining;
 }
 
 WeaselPanel::CaretSideBearings WeaselPanel::_MeasureCaretSideBearings(
@@ -1683,7 +1686,8 @@ LRESULT WeaselPanel::OnTimerMessage(UINT uMsg,
       _ResetCaretMotion();
       return 0;
     }
-    if (std::abs(_CaretPosition(GetTickCount64()) - caret_target_) <= kCaretSettlePx) {
+    if (!ClientMotionEnabled() ||
+        std::abs(_CaretPosition(GetTickCount64()) - caret_target_) <= kCaretSettlePx) {
       ::KillTimer(m_hWnd, kCaretTimer);
       caret_motion_start_ = 0;
     }
