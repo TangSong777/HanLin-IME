@@ -41,19 +41,14 @@
 ## 3. 前置条件
 
 1. 服务端已部署并可从本机访问（正式：`https://sync.yanghanlin.cn`）。
-2. 在服务端生成一次配对码（10 分钟有效、只可使用一次）：
-
-   ```bash
-   sudo -u hanlin-sync HANLIN_SYNC_DATA=/srv/hanlin-sync/data \
-     node /srv/hanlin-sync/app/server.mjs --pair ime "我的笔记本"
-   ```
+2. 服务器已启用动态验证码配对。打开 Authenticator 的「Rock5b+」条目，准备当前六位码。每个时间步在寒淋云同步中只能配对一次。若刚为寒淋笔记配对，等待验证码刷新即可。
 
 3. 本机已安装寒淋输入法，且 `HanLinHost.exe` 与它的 `data` 目录可用。
 
 ## 4. 使用
 
 ```powershell
-# 配对（命令会隐藏输入配对码；令牌由 Windows DPAPI 保护）
+# 配对（命令会隐藏输入；设备令牌由 Windows DPAPI 保护）
 pwsh -File src\Sync-HanLin.ps1 pair -DeviceName "我的笔记本"
 
 # 上传：先本机导出词频，再上传变更文件并提交新版本
@@ -82,7 +77,7 @@ pwsh -File src\Sync-HanLin.ps1 history
 ## 5. 换机流程
 
 1. 新机安装寒淋输入法，打开一次让它生成 `installation.yaml`（`installation_id` 每台机器独立）。
-2. 在服务端为新机生成配对码，执行 `pair`。
+2. 在新机输入 Authenticator 当前六位动态验证码，完成配对。
 3. 执行 `pull -IncludeConfig`：下载并校验全部文件；配置、词库与皮肤按相对路径写入用户目录
    （写入前备份到 `.hanlin-sync-backup\<时间戳>-pull`），词频写入 `sync\<源设备 id>\` 后调用
    `HanLinHost --sync-user-data` 合并。
@@ -132,7 +127,7 @@ pwsh -File src\Sync-HanLin.ps1 history
 
 | 现象 | 处理 |
 | --- | --- |
-| `尚未配对` | 先 `pair`；配对码过期就重新生成 |
+| `尚未配对` | 先 `pair`；验证码已用过或已过期就等手机显示下一码 |
 | `401` / `invalid_token` | 令牌被吊销或服务器重装过，重新 `pair` |
 | `409 parent_mismatch` | 远端已被其他设备推进，先 `pull`；确认以本机为准才 `-Force` |
 | `本地词库同步失败` | 看 `<UserData>\sync-report.json` 的 `error`，确认 `rime.dll` 与 `data\build` 完整 |

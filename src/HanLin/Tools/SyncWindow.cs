@@ -10,7 +10,7 @@ namespace HanLin.Tools
     {
         private readonly HostActions host;
         private readonly InkField server = Theme.Field("服务器地址");
-        private readonly InkField code = Theme.Field("一次性配对码");
+        private readonly InkField code = Theme.Field("六位动态验证码");
         private readonly Label status = Theme.Label("正在检查配对…", Theme.Small, Theme.Ink);
         private readonly InkButton primary = new InkButton("立即同步", true) { Size = new Size(106, 32), Dock = DockStyle.None };
         private readonly TableLayoutPanel pairing;
@@ -30,7 +30,7 @@ namespace HanLin.Tools
             pairing = Theme.Layout(1, 18, 29, 18, 29);
             pairing.Controls.Add(Theme.Label("服务器地址", Theme.Small, Theme.Muted), 0, 0);
             pairing.Controls.Add(server, 0, 1);
-            pairing.Controls.Add(Theme.Label("一次性配对码", Theme.Small, Theme.Muted), 0, 2);
+            pairing.Controls.Add(Theme.Label("Authenticator 六位动态验证码", Theme.Small, Theme.Muted), 0, 2);
             pairing.Controls.Add(code, 0, 3);
             layout.Controls.Add(pairing, 0, 1);
             var hint = Theme.Label("合并词频前会备份本机词库。服务器可以读取同步内容，换电脑后请重新配对。",
@@ -52,16 +52,16 @@ namespace HanLin.Tools
             pairing.Visible = !paired;
             var layout = (TableLayoutPanel)pairing.Parent;
             layout.RowStyles[1].Height = paired ? 0 : 98;
-            if (!paired) status.Text = "输入为这台设备签发的一次性配对码。";
+            if (!paired) status.Text = "输入手机 Authenticator 上显示的当前验证码。";
         }
 
         private void ActivateAction()
         {
             if (paired) { Run("sync"); return; }
             string secret = code.Text.Trim();
-            if (!Regex.IsMatch(secret, "^[A-Za-z0-9-]{8,32}$"))
+            if (!Regex.IsMatch(secret, "^(?:[0-9]{6}|[A-Za-z0-9-]{8,32})$"))
             {
-                status.Text = "请输入有效的一次性配对码。";
+                status.Text = "请输入 Authenticator 的六位动态验证码。";
                 return;
             }
             code.Text = "";

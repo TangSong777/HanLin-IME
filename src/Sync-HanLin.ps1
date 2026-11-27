@@ -18,7 +18,7 @@
   同步状态保存在 <UserData>\.hanlin-sync.json。
 
 .PARAMETER Action
-  pair（用配对码换令牌）、push、pull、restore（-Commit 指定历史版本）、status、history。
+  pair（验证 Authenticator 动态码并获取设备令牌）、push、pull、restore（-Commit 指定历史版本）、status、history。
 .PARAMETER UserData
   Rime 用户目录，默认 %APPDATA%\Rime。
 .PARAMETER HostPath
@@ -28,7 +28,7 @@
 .PARAMETER Server
   同步服务地址，默认 https://sync.yanghanlin.cn；只对 127.0.0.1 / localhost 允许 http。
 .PARAMETER Code
-  pair 时使用的一次性配对码（在服务器上用 --pair ime <设备名> 生成）。
+  pair 时使用的 Authenticator 六位动态验证码。
 .PARAMETER DeviceName
   设备显示名，默认当前计算机名。
 .PARAMETER Commit
@@ -412,13 +412,28 @@ function Invoke-HostSync {
 }
 
 function Invoke-Pair {
-  $code = if ($PairFromStdin) { [Console]::ReadLine() } else { Read-Host '寒淋输入法配对码' -MaskInput }
-  if (-not $code -or $code.Trim() -notmatch '^[A-Za-z0-9-]{8,32}$') { Fail '请输入有效的一次性配对码。' }
-  $normalized = $code.Trim().ToUpperInvariant()
-  $resp = Invoke-Api -NoAuth -Method POST -Path '/v1/pair' -Body @{ code = $normalized; name = $DeviceName }
-  if ([int]$resp.StatusCode -notin 200,201) { Fail ("配对失败：" + (Get-ErrorCode $resp)) }
+  $code = if ($PairFromStdin) { [Console]::ReadLine() } else { Read-Host 'Authenticator 六位动态验证码' -MaskInput }
+  $code = ([string]$code).Trim()
+  $request = if ($code -cmatch '^[0-9]{6}$') {
+    @{ app = $script:App; totp = $code; name = $DeviceName }
+  } elseif ($code -cmatch '^[A-Za-z0-9-]{8,32}$') {
+    @{ app = $script:App; code = $code.ToUpperInvariant(); name = $DeviceName }
+  } else { Fail '请输入 Authenticator 的六位动态验证码。' }
+  $resp = Invoke-Api -NoAuth -Method POST -Path '/v1/pair' -Body $request
+  if ([int]$resp.StatusCode -notin 200,201) {
+    $errorCode = Get-ErrorCode $resp
+    $message = switch ($errorCode) {
+      'totp_required' { '请输入 Authenticator 的六位动态验证码。' }
+      'totp_invalid' { '动态验证码不正确，请核对手机上的当前验证码。' }
+      'totp_reused' { '这个验证码已经用过，请等下一个。' }
+      { $_ -in 'totp_unavailable','bad_code' } { '服务器尚未启用动态验证码配对。' }
+      'too_many_failures' { '尝试次数过多，请稍后再试。' }
+      default { "配对失败：$errorCode" }
+    }
+    Fail $message
+  }
   $body = $resp.Content | ConvertFrom-Json
-  if ($body.app -ne $script:App -or -not $body.token) { Fail '请使用为寒淋输入法签发的配对码。' }
+  if ($body.app -ne $script:App -or -not $body.token) { Fail '服务器没有签发寒淋输入法的设备令牌。' }
   Write-Secret $script:CredFile ([string]$body.token)
   $state = [pscustomobject]@{
     server      = $script:Server
