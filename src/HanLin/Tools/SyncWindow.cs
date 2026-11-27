@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -11,7 +12,7 @@ namespace HanLin.Tools
         private readonly HostActions host;
         private readonly InkField server = Theme.Field("服务器地址");
         private readonly InkField code = Theme.Field("六位动态验证码");
-        private readonly Label status = Theme.Label("正在检查配对…", Theme.Small, Theme.Ink);
+        private readonly Label status = Theme.Label("", Theme.Small, Theme.Ink);
         private readonly InkButton primary = new InkButton("立即同步", true) { Size = new Size(106, 32), Dock = DockStyle.None };
         private readonly TableLayoutPanel pairing;
         private bool paired, busy;
@@ -20,8 +21,11 @@ namespace HanLin.Tools
         {
             this.host = host;
             Text = "寒淋输入法 · 云同步";
-            string saved = HostActions.ConfiguredSyncServer(host.DirectoryPath);
-            paired = saved != null;
+            var state = host.ReadCloudSyncState();
+            object configuredServer = null;
+            if (state != null) state.TryGetValue("server", out configuredServer);
+            string saved = configuredServer as string;
+            paired = !string.IsNullOrWhiteSpace(saved);
             server.Text = saved ?? "https://sync.yanghanlin.cn";
             code.MaskInput();
             Body.Padding = new Padding(24, 16, 24, 18);
@@ -43,7 +47,24 @@ namespace HanLin.Tools
             layout.Controls.Add(footer, 0, 3);
             Body.Controls.Add(layout);
             SetPairing(paired);
-            Shown += (sender, args) => { if (paired) Run("status"); else code.Focus(); };
+            if (paired)
+            {
+                object value;
+                DateTimeOffset lastSync;
+                if (state.TryGetValue("pendingMerge", out value) && Equals(value, true))
+                    status.Text = "词频待合并。请先使用寒淋输入法输入并选词，再重试同步。";
+                else if (state.TryGetValue("lastSync", out value) &&
+                    DateTimeOffset.TryParse(value as string, CultureInfo.InvariantCulture, DateTimeStyles.None, out lastSync))
+                    status.Text = "上次同步：" + lastSync.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+                else
+                    status.Text = "已配对，等待首次同步。";
+            }
+            Shown += (sender, args) =>
+            {
+                var job = host.CloudSyncJob;
+                if (job != null && !job.IsCompleted) Observe(job, host.CloudSyncOperation);
+                else if (!paired) code.Focus();
+            };
         }
 
         private void SetPairing(bool enabled)
@@ -69,26 +90,26 @@ namespace HanLin.Tools
             Run("pair", secret);
         }
 
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            if (busy && e.CloseReason == CloseReason.UserClosing) e.Cancel = true;
-            base.OnFormClosing(e);
-        }
-
-        private async void Run(string operation, string secret = null)
+        private void Run(string operation, string secret = null)
         {
             if (busy) return;
+            host.StartCloudSync(operation, server.Text.Trim(), secret);
+            Observe(host.CloudSyncJob, host.CloudSyncOperation);
+        }
+
+        private async void Observe(Task<Tuple<int, string>> job, string operation)
+        {
             busy = true;
             primary.Enabled = pairing.Enabled = false;
-            string endpoint = server.Text.Trim();
-            status.Text = "正在处理…";
+            status.Text = operation == "pair" ? "正在配对，关闭窗口后会继续。" : "正在同步词频，关闭窗口后会继续。";
             try
             {
-                var result = await Task.Run(() => host.CloudSync(operation, endpoint, Environment.MachineName, secret, null));
+                var result = await job;
+                if (IsDisposed || Disposing || !Visible) return;
                 if (result.Item1 != 0)
                 {
-                    status.Text = result.Item2;
                     if (result.Item2.Contains("重新配对")) SetPairing(false);
+                    status.Text = result.Item2;
                     return;
                 }
                 if (operation == "pair")
@@ -99,18 +120,21 @@ namespace HanLin.Tools
                 }
                 var lines = result.Item2.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
                 var info = Array.Find(lines, line => line.Contains("等待合并") || line.Contains("词频待合并"));
-                status.Text = info ?? (operation == "sync" ? "词频同步完成。"
-                    : Array.Find(lines, line => line.StartsWith("上次同步：", StringComparison.Ordinal)) ?? "已配对，等待首次同步。");
+                status.Text = info ?? "词频同步完成。";
             }
             catch (Exception ex)
             {
-                status.Text = "无法运行同步工具。请确认已安装 PowerShell 7。\r\n" + ex.Message;
+                if (!IsDisposed && !Disposing && Visible)
+                    status.Text = "无法运行同步工具。\r\n" + ex.Message;
             }
             finally
             {
                 busy = false;
-                primary.Enabled = pairing.Enabled = true;
-                if (!paired) code.Focus();
+                if (!IsDisposed && !Disposing && Visible)
+                {
+                    primary.Enabled = pairing.Enabled = true;
+                    if (!paired) code.Focus();
+                }
             }
         }
     }

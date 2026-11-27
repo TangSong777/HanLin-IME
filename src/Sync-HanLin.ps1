@@ -130,8 +130,9 @@ function Invoke-WithProfileAccess {
     try {
       if ($resume) {
         $start = [Diagnostics.ProcessStartInfo]::new($exe)
-        $start.UseShellExecute = $false
-        $start.CreateNoWindow = $true
+        # Launch the long-lived GUI host without inheriting the sync tool's output pipes.
+        $start.UseShellExecute = $true
+        $start.WindowStyle = 'Hidden'
         foreach ($arg in @('--user-data', $UserData, '--shared-data', (Resolve-SharedData $exe))) {
           $start.ArgumentList.Add($arg)
         }

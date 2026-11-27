@@ -69,6 +69,8 @@ namespace HanLin.Tools
                     case Action.CloudSync: using (var window = new SyncWindow(host)) Application.Run(window); break;
                     case Action.Data: Process.Start(new ProcessStartInfo(host.DirectoryPath) { UseShellExecute = true }); break;
                 }
+                // Let a sync finish even when the user closes all tool windows.
+                host.WaitForCloudSync();
                 return 0;
             }
             catch (Exception error)

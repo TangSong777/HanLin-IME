@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Text;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
@@ -35,15 +36,29 @@ namespace HanLin.Tools
             Words = new WordStore(DirectoryPath);
         }
 
-        internal static string ConfiguredSyncServer(string profile)
+        internal Task<Tuple<int, string>> CloudSyncJob { get; private set; }
+        internal string CloudSyncOperation { get; private set; }
+
+        internal void StartCloudSync(string operation, string server, string code)
+        {
+            if (CloudSyncJob != null && !CloudSyncJob.IsCompleted) return;
+            CloudSyncOperation = operation;
+            CloudSyncJob = Task.Run(() => CloudSync(operation, server, Environment.MachineName, code));
+        }
+
+        internal void WaitForCloudSync()
+        {
+            if (CloudSyncJob == null) return;
+            try { CloudSyncJob.GetAwaiter().GetResult(); }
+            catch (Exception) { /* The sync window reports failures while open. */ }
+        }
+
+        internal Dictionary<string, object> ReadCloudSyncState()
         {
             try
             {
-                var path = Path.Combine(profile, ".hanlin-sync.json");
-                if (!File.Exists(path)) return null;
-                var values = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
-                object value;
-                return values.TryGetValue("server", out value) ? value as string : null;
+                var path = Path.Combine(DirectoryPath, ".hanlin-sync.json");
+                return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
             }
             catch (Exception error)
             {
@@ -67,14 +82,13 @@ namespace HanLin.Tools
             }
         }
 
-        internal Tuple<int, string> CloudSync(string action, string server, string name, string code, string commit)
+        private Tuple<int, string> CloudSync(string action, string server, string name, string code)
         {
             string script = Path.Combine(Path.GetDirectoryName(executable), "Sync-HanLin.ps1");
             if (!File.Exists(script)) throw new FileNotFoundException("安装目录里缺少云同步脚本，请重新安装。");
             var args = new List<string> { "-NoLogo", "-NoProfile", "-NonInteractive", "-File", script,
                 action, "-UserData", DirectoryPath, "-HostPath", executable, "-SharedData", Shared,
                 "-Server", server, "-DeviceName", name };
-            if (commit != null) { args.Add("-Commit"); args.Add(commit); }
             if (code != null) args.Add("-PairFromStdin");
             if (action == "sync")
             {
