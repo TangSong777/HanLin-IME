@@ -14,6 +14,9 @@ namespace HanLin.Tools
 
     internal sealed class TrayMenu : Forms.ContextMenuStrip
     {
+        private const float OuterRadius = 8;
+        private const float ItemRadius = 5;
+        private const int DpiChanged = 0x02E0;
         private readonly Drawing.Font menuFont = new Drawing.Font("Microsoft YaHei UI", 9f);
         private readonly Drawing.Bitmap imageSlot = new Drawing.Bitmap(16, 16);
 
@@ -68,6 +71,7 @@ namespace HanLin.Tools
 
         protected override void OnOpened(EventArgs e)
         {
+            UpdateOutline();
             base.OnOpened(e);
             if (mouseHook == IntPtr.Zero) SetForegroundWindow(Handle);
             if (animateOpening)
@@ -135,10 +139,21 @@ namespace HanLin.Tools
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
+            UpdateOutline();
+        }
+
+        protected override void WndProc(ref Forms.Message message)
+        {
+            base.WndProc(ref message);
+            if (message.Msg == DpiChanged) UpdateOutline();
+        }
+
+        private void UpdateOutline()
+        {
             if (ClientSize.Width < 2 || ClientSize.Height < 2)
                 return;
             var previous = Region;
-            using (var outline = Rounded(ClientRectangle, 8 * DpiScale(this)))
+            using (var outline = Rounded(ClientRectangle, OuterRadius * DpiScale(this)))
                 Region = new Drawing.Region(outline);
             if (previous != null) previous.Dispose();
         }
@@ -155,17 +170,19 @@ namespace HanLin.Tools
             }
         }
 
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr window);
+
         private static float DpiScale(Forms.ToolStrip strip)
         {
-            if (strip == null || !strip.IsHandleCreated) return 1f;
-            using (var graphics = strip.CreateGraphics()) return graphics.DpiX / 96f;
+            uint dpi = strip != null && strip.IsHandleCreated ? GetDpiForWindow(strip.Handle) : 0;
+            return dpi > 0 ? dpi / 96f : 1f;
         }
 
         private static Drawing2D.GraphicsPath Rounded(Drawing.RectangleF bounds, float radius)
         {
             var path = new Drawing2D.GraphicsPath();
-            float corner = Math.Min(radius, Math.Min(bounds.Width, bounds.Height) / 2);
-            float diameter = corner * 2;
+            float diameter = Math.Min(2 * radius, Math.Min(bounds.Width, bounds.Height));
             path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
             path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
             path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
@@ -205,9 +222,11 @@ namespace HanLin.Tools
                 if (bounds.Width < 2 || bounds.Height < 2)
                     return;
                 e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias;
-                using (var outline = Rounded(new Drawing.RectangleF(0.5f, 0.5f, bounds.Width - 1, bounds.Height - 1),
-                    8 * DpiScale(e.ToolStrip)))
-                using (var pen = new Drawing.Pen(Color("EdgeBrush", Drawing.SystemColors.WindowFrame)))
+                float scale = DpiScale(e.ToolStrip);
+                float inset = scale / 2;
+                using (var outline = Rounded(new Drawing.RectangleF(inset, inset, bounds.Width - scale, bounds.Height - scale),
+                    OuterRadius * scale - inset))
+                using (var pen = new Drawing.Pen(Color("EdgeBrush", Drawing.SystemColors.WindowFrame), scale))
                     e.Graphics.DrawPath(pen, outline);
             }
 
@@ -220,7 +239,7 @@ namespace HanLin.Tools
                 if (bounds.Width <= 0 || bounds.Height <= 0)
                     return;
                 e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias;
-                using (var highlight = Rounded(bounds, 5 * scale))
+                using (var highlight = Rounded(bounds, ItemRadius * scale))
                 using (var fill = new Drawing.SolidBrush(Color(e.Item.Pressed ? "PressBrush" : "HoverBrush",
                     Drawing.SystemColors.Highlight)))
                     e.Graphics.FillPath(fill, highlight);
